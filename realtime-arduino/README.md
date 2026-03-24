@@ -9,7 +9,10 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
 - `ads1263_reader/ads1263_reader.ino`
   - ADS1263 differential capture on `IN0-IN1`
   - DRDY falling-edge interrupt sampling
-  - Buffered capture and end-of-run stats (`std(mV)`, `mean/std dt_us`, realized FPS)
+  - Continuous streaming output lines: `DATA,timestamp_us,raw,mV`
+  - Periodic stream stats lines: `STATS,fps=...,count=...,dropped_edges=...`
+- `stream_logger.py`
+  - Laptop-side logger that waits on serial stream and records CSV
 
 ### Wiring (Mega 2560 -> AD HAT)
 
@@ -42,18 +45,6 @@ List boards/ports:
 arduino-cli board list
 ```
 
-Compile self-check:
-
-```bash
-arduino-cli compile --fqbn arduino:avr:mega realtime-arduino/arduino_self_check
-```
-
-Upload self-check (replace port if needed):
-
-```bash
-arduino-cli upload -p /dev/ttyACM1 --fqbn arduino:avr:mega realtime-arduino/arduino_self_check
-```
-
 Compile ADS1263 reader:
 
 ```bash
@@ -66,16 +57,31 @@ Upload ADS1263 reader:
 arduino-cli upload -p /dev/ttyACM1 --fqbn arduino:avr:mega realtime-arduino/ads1263_reader
 ```
 
-Serial monitor (115200):
+### Laptop Logger
+
+Install dependency:
 
 ```bash
-arduino-cli monitor -p /dev/ttyACM1 -c baudrate=115200
+python -m pip install pyserial
+```
+
+Run logger (matches sketch baud rate `230400`):
+
+```bash
+python realtime-arduino/stream_logger.py --port /dev/ttyACM1 --baud 230400 --output ads1263_stream.csv
+```
+
+Optional timed run (example: 20 seconds):
+
+```bash
+python realtime-arduino/stream_logger.py --port /dev/ttyACM1 --baud 230400 --output ads1263_stream.csv --duration 20
 ```
 
 ### Expected ADS1263 Reader Output
 
 - Register configuration verification lines (`REG_MODE*`, `REG_REFMUX`)
-- Capture start message
-- End-of-capture summary and CSV-like sample dump:
-  - `timestamp_us,raw,mV`
-  - final stats including realized FPS
+- Stream start message
+- Repeating sample lines:
+  - `DATA,timestamp_us,raw,mV`
+- Periodic status lines:
+  - `STATS,fps=...,count=...,dropped_edges=...`

@@ -8,18 +8,16 @@ constexpr uint8_t PIN_HW_SS = 53;  // Mega hardware SS must be output
 constexpr float ADC_REF_MV = 5000.0f;  // Set to measured AVDD in mV for accuracy
 constexpr uint8_t DIFF_AIN_P = 0;      // Differential + input: IN0
 constexpr uint8_t DIFF_AIN_N = 1;      // Differential - input: IN1
-constexpr uint16_t SAMPLE_BUFFER_SIZE = 256;
+constexpr uint32_t STREAM_BAUD = 230400;
+constexpr uint32_t STREAM_STATS_INTERVAL_MS = 1000;
 
-struct SamplePoint {
-  uint32_t t_us;
-  int32_t raw;
-};
+volatile bool g_samplePending = false;
+volatile uint32_t g_pendingTimestampUs = 0;
+volatile uint32_t g_droppedEdges = 0;
 
-volatile SamplePoint g_samples[SAMPLE_BUFFER_SIZE];
-volatile uint16_t g_sampleCount = 0;
-volatile bool g_captureArmed = false;
-volatile bool g_bufferFull = false;
-bool g_reported = false;
+uint32_t g_streamCount = 0;
+uint32_t g_lastStatsMs = 0;
+uint32_t g_lastStatsCount = 0;
 
 // ===== ADS1263 command/register map (subset) =====
 constexpr uint8_t CMD_RESET = 0x06;
@@ -205,21 +203,12 @@ int32_t adsReadAdc1RawInline() {
 }
 
 void onDrdyFalling() {
-  if (!g_captureArmed || g_bufferFull) return;
-  uint16_t idx = g_sampleCount;
-  if (idx >= SAMPLE_BUFFER_SIZE) {
-    g_bufferFull = true;
-    g_captureArmed = false;
-    return;
-  }
-
-  g_samples[idx].t_us = micros();
-  g_samples[idx].raw = adsReadAdc1RawInline();
-  g_sampleCount = idx + 1;
-
-  if (g_sampleCount >= SAMPLE_BUFFER_SIZE) {
-    g_bufferFull = true;
-    g_captureArmed = false;
+  uint32_t t = micros();
+  if (g_samplePending) {
+    ++g_droppedEdges;
+  } else {
+    g_pendingTimestampUs = t;
+    g_samplePending = true;
   }
 }
 
@@ -239,7 +228,7 @@ float sqrtNewton(float x) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(STREAM_BAUD);
   while (!Serial) {
     ;  // For boards with native USB; harmless on UNO.
   }
@@ -256,89 +245,64 @@ void setup() {
       FilterMode::Sinc1   // filter mode
   );
 
-  noInterrupts();
-  g_sampleCount = 0;
-  g_bufferFull = false;
-  g_captureArmed = true;
-  interrupts();
-
   attachInterrupt(digitalPinToInterrupt(PIN_DRDY), onDrdyFalling, FALLING);
   adsWriteCommand(CMD_START1);
   delay(10);
+
+  g_lastStatsMs = millis();
 
   Serial.println("Target board: Mega 2560");
   Serial.print("ADC1 differential input: IN");
   Serial.print(DIFF_AIN_P);
   Serial.print(" - IN");
   Serial.println(DIFF_AIN_N);
-  Serial.print("Capturing ");
-  Serial.print(SAMPLE_BUFFER_SIZE);
-  Serial.println(" samples on DRDY falling edges...");
+  Serial.print("Streaming at baud=");
+  Serial.println(STREAM_BAUD);
+  Serial.println("DATA,timestamp_us,raw,mV");
 }
 
 void loop() {
-  if (!g_bufferFull || g_reported) return;
-
-  g_reported = true;
-  adsWriteCommand(CMD_STOP1);
-  detachInterrupt(digitalPinToInterrupt(PIN_DRDY));
-
-  uint16_t count = 0;
+  bool hasSample = false;
+  uint32_t tsUs = 0;
   noInterrupts();
-  count = g_sampleCount;
+  if (g_samplePending) {
+    hasSample = true;
+    tsUs = g_pendingTimestampUs;
+    g_samplePending = false;
+  }
   interrupts();
 
-  Serial.println("Capture complete.");
-  Serial.print("samples=");
-  Serial.println(count);
+  if (hasSample) {
+    int32_t raw = adsReadAdc1RawInline();
+    float mv = rawToMilliVolts(raw);
+    ++g_streamCount;
 
-  if (count == 0) return;
-
-  float sumMv = 0.0f;
-  for (uint16_t i = 0; i < count; ++i) {
-    sumMv += rawToMilliVolts(g_samples[i].raw);
-  }
-  const float meanMv = sumMv / static_cast<float>(count);
-
-  float varMv = 0.0f;
-  for (uint16_t i = 0; i < count; ++i) {
-    float d = rawToMilliVolts(g_samples[i].raw) - meanMv;
-    varMv += d * d;
-  }
-  const float stdMv = sqrtNewton(varMv / static_cast<float>(count));
-
-  float meanDtUs = 0.0f;
-  float stdDtUs = 0.0f;
-  float fpsFromMeanDt = 0.0f;
-  if (count > 1) {
-    const uint16_t dtCount = count - 1;
-    float sumDt = 0.0f;
-    for (uint16_t i = 1; i < count; ++i) {
-      uint32_t dt = g_samples[i].t_us - g_samples[i - 1].t_us;
-      sumDt += static_cast<float>(dt);
-    }
-    meanDtUs = sumDt / static_cast<float>(dtCount);
-
-    float varDt = 0.0f;
-    for (uint16_t i = 1; i < count; ++i) {
-      uint32_t dt = g_samples[i].t_us - g_samples[i - 1].t_us;
-      float d = static_cast<float>(dt) - meanDtUs;
-      varDt += d * d;
-    }
-    stdDtUs = sqrtNewton(varDt / static_cast<float>(dtCount));
-
-    if (meanDtUs > 0.0f) {
-      fpsFromMeanDt = 1000000.0f / meanDtUs;
-    }
+    Serial.print("DATA,");
+    Serial.print(tsUs);
+    Serial.print(",");
+    Serial.print(raw);
+    Serial.print(",");
+    Serial.println(mv, 3);
   }
 
-  Serial.println("stats:");
-  Serial.print("std(mV)=");
-  Serial.println(stdMv, 6);
-  Serial.print("mean(dt_us)=");
-  Serial.println(meanDtUs, 3);
-  Serial.print("std(dt_us)=");
-  Serial.println(stdDtUs, 3);
-  Serial.print("Realized FPS=");
-  Serial.println(fpsFromMeanDt, 3);
+  uint32_t nowMs = millis();
+  if (nowMs - g_lastStatsMs >= STREAM_STATS_INTERVAL_MS) {
+    uint32_t dCount = g_streamCount - g_lastStatsCount;
+    float fps = (1000.0f * static_cast<float>(dCount)) /
+                static_cast<float>(nowMs - g_lastStatsMs);
+    uint32_t dropped = 0;
+    noInterrupts();
+    dropped = g_droppedEdges;
+    interrupts();
+
+    Serial.print("STATS,fps=");
+    Serial.print(fps, 2);
+    Serial.print(",count=");
+    Serial.print(g_streamCount);
+    Serial.print(",dropped_edges=");
+    Serial.println(dropped);
+
+    g_lastStatsMs = nowMs;
+    g_lastStatsCount = g_streamCount;
+  }
 }
