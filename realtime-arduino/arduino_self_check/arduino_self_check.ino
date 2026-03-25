@@ -22,15 +22,21 @@ void printBanner() {
 void setup() {
   pinMode(LED_PIN, OUTPUT);
   pinMode(TEST_ADC_PIN, INPUT);
-  // Keep SPI hardware SS as output on Mega to avoid master-mode glitches.
+  // Keep SPI hardware SS as output to avoid master-mode glitches.
+#if defined(ARDUINO_AVR_MEGA2560) || defined(__AVR_ATmega2560__)
   pinMode(53, OUTPUT);
   digitalWrite(53, HIGH);
+#else
+  // UNO hardware SS is pin 10
+  pinMode(10, OUTPUT);
+  digitalWrite(10, HIGH);
+#endif
 
   Serial.begin(115200);
   delay(300);
 
   printBanner();
-  Serial.println("Target board: Mega 2560");
+  Serial.println("Target board: Arduino UNO (self-check)");
   Serial.println("Boot OK");
 }
 

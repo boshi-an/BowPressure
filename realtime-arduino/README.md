@@ -1,6 +1,6 @@
 ## Arduino ADS1263 Examples
 
-Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with **Arduino Mega 2560**.
+Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with **Arduino UNO** and **Arduino Mega 2560**.
 
 ### Sketches
 
@@ -13,6 +13,18 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
   - Periodic stream stats lines: `STATS,fps=...,count=...,dropped_edges=...`
 - `stream_logger.py`
   - Laptop-side logger that waits on serial stream and records CSV
+
+### Wiring (UNO -> AD HAT)
+
+- `D13 (SCK)` -> `SCLK`
+- `D11 (MOSI)` -> `DIN`
+- `D12 (MISO)` -> `DOUT`
+- `D10` -> `CS`
+- `D2` -> `DRDY`
+- `D4` -> `RESET` / `REST`
+- `5V` -> `AVDD` (analog supply)
+- `3.3V` -> `VCC` (digital logic supply)
+- `GND` -> `AVSS` (or `COM` if AVSS-COM is already tied)
 
 ### Wiring (Mega 2560 -> AD HAT)
 
@@ -28,8 +40,8 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
 
 ### Important Electrical Note
 
-The AD HAT is Raspberry-Pi-oriented (3.3V logic). Mega pins are 5V.
-Use level shifting on Mega outputs (`SCLK`, `DIN`, `CS`, `RESET`) for safe operation.
+The AD HAT is Raspberry-Pi-oriented (3.3V logic). UNO/Mega pins are 5V.
+Use level shifting on outputs (`SCLK`, `DIN`, `CS`, `RESET`) for safe operation.
 
 ### Build and Upload (arduino-cli)
 
@@ -45,17 +57,32 @@ List boards/ports:
 arduino-cli board list
 ```
 
-Compile ADS1263 reader:
+Compile ADS1263 reader (pick the right FQBN for your board):
 
 ```bash
-arduino-cli compile --fqbn arduino:avr:mega realtime-arduino/ads1263_reader
+arduino-cli compile --fqbn <FQBN> realtime-arduino/ads1263_reader
+```
+
+Compile self-check (pick the right FQBN for your board):
+
+```bash
+arduino-cli compile --fqbn <FQBN> realtime-arduino/arduino_self_check
 ```
 
 Upload ADS1263 reader:
 
 ```bash
-arduino-cli upload -p /dev/ttyACM1 --fqbn arduino:avr:mega realtime-arduino/ads1263_reader
+arduino-cli upload -p /dev/ttyACM1 --fqbn <FQBN> realtime-arduino/ads1263_reader
 ```
+
+Important: the `--fqbn` must match the exact board you are using.
+For example:
+- Arduino UNO R4 WiFi: `arduino:renesas_uno:unor4wifi`
+- Arduino UNO (classic AVR): `arduino:avr:uno`
+- Arduino Mega 2560 (AVR): `arduino:avr:mega`
+- Do `arduino-cli board list` to see your fqbn.
+
+Replace `/dev/ttyACM1` with the port shown by `arduino-cli board list` for your setup.
 
 ### Laptop Logger
 

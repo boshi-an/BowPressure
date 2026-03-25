@@ -1,10 +1,10 @@
 #include <SPI.h>
 
-// ===== Pin mapping (Arduino Mega 2560) =====
-constexpr uint8_t PIN_CS = 53;   // CS to ADS1263
-constexpr uint8_t PIN_DRDY = 2;  // DRDY (must be input)
+// ===== Pin mapping (Arduino UNO) =====
+constexpr uint8_t PIN_CS = 10;   // CS to ADS1263 (UNO HW SS)
+constexpr uint8_t PIN_DRDY = 2;  // DRDY (must be input; UNO supports INT0 on D2)
 constexpr uint8_t PIN_RST = 4;   // RESET pin on AD HAT
-constexpr uint8_t PIN_HW_SS = 53;  // Mega hardware SS must be output
+constexpr uint8_t PIN_HW_SS = 10;  // UNO hardware SS must be output
 constexpr float ADC_REF_MV = 5000.0f;  // Set to measured AVDD in mV for accuracy
 constexpr uint8_t DIFF_AIN_P = 0;      // Differential + input: IN0
 constexpr uint8_t DIFF_AIN_N = 1;      // Differential - input: IN1
@@ -174,7 +174,7 @@ void adsConfigAdc1(uint8_t gain, uint8_t drate, uint8_t delayReg, FilterMode fil
   mode2 |= ((gain & 0x07) << 4) | (drate & 0x0F);
   adsWriteRegVerified(REG_MODE2, mode2, "REG_MODE2");
 
-  uint8_t refmux = 0x00;  // AVDD/AVSS as reference
+  uint8_t refmux = 0x24;  // AVDD/AVSS as reference (matches Waveshare/Pi example)
   adsWriteRegVerified(REG_REFMUX, refmux, "REG_REFMUX");
 
   uint8_t mode0 = delayReg;
@@ -251,7 +251,7 @@ void setup() {
 
   g_lastStatsMs = millis();
 
-  Serial.println("Target board: Mega 2560");
+  Serial.println("Target board: Arduino UNO");
   Serial.print("ADC1 differential input: IN");
   Serial.print(DIFF_AIN_P);
   Serial.print(" - IN");

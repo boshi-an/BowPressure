@@ -41,6 +41,12 @@ def main() -> int:
     bad_lines = 0
     first_arduino_us = None
     last_arduino_us = None
+    prev_arduino_us = None
+    mv_sum = 0.0
+    mv_sumsq = 0.0
+    dt_sum = 0.0
+    dt_sumsq = 0.0
+    dt_count = 0
     update_counter = 0
 
     plot_enabled = args.plot
@@ -126,6 +132,15 @@ def main() -> int:
                 first_arduino_us = arduino_us if first_arduino_us is None else first_arduino_us
                 last_arduino_us = arduino_us
 
+                mv_sum += mv
+                mv_sumsq += mv * mv
+                if prev_arduino_us is not None:
+                    d_us = arduino_us - prev_arduino_us
+                    dt_sum += float(d_us)
+                    dt_sumsq += float(d_us) * float(d_us)
+                    dt_count += 1
+                prev_arduino_us = arduino_us
+
                 if plot_enabled and first_arduino_us is not None:
                     elapsed_s = (arduino_us - first_arduino_us) / 1_000_000.0
                     plot_elapsed.append(elapsed_s)
@@ -170,6 +185,20 @@ def main() -> int:
         if dt_us > 0:
             fps = (sample_count - 1) * 1_000_000.0 / dt_us
             print(f"arduino_fps={fps:.3f}")
+
+    if sample_count > 0:
+        mv_mean = mv_sum / float(sample_count)
+        mv_var = (mv_sumsq / float(sample_count)) - (mv_mean * mv_mean)
+        mv_var = mv_var if mv_var > 0.0 else 0.0
+        mv_std = mv_var ** 0.5
+        print(f"mv_mean={mv_mean:.6f}, mv_std={mv_std:.6f}")
+
+    if dt_count > 0:
+        dt_mean = dt_sum / float(dt_count)
+        dt_var = (dt_sumsq / float(dt_count)) - (dt_mean * dt_mean)
+        dt_var = dt_var if dt_var > 0.0 else 0.0
+        dt_std = dt_var ** 0.5
+        print(f"dt_us_mean={dt_mean:.3f}, dt_us_std={dt_std:.3f}")
     return 0
 
 
