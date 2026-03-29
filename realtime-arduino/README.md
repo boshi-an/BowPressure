@@ -11,6 +11,9 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
   - DRDY falling-edge interrupt sampling
   - Continuous streaming output lines: `DATA,timestamp_us,raw,mV`
   - Periodic stream stats lines: `STATS,fps=...,count=...,dropped_edges=...`
+- `bno08x_reader/bno08x_reader.ino`
+  - BNO08x IMU reader over I2C (`SDA`/`SCL`)
+  - Outputs CSV: `IMU,t_us,ax,ay,az,gx,gy,gz,qw,qx,qy,qz`
 - `stream_logger.py`
   - Laptop-side logger that waits on serial stream and records CSV
 
@@ -112,3 +115,21 @@ python realtime-arduino/stream_logger.py --port /dev/ttyACM1 --baud 230400 --out
   - `DATA,timestamp_us,raw,mV`
 - Periodic status lines:
   - `STATS,fps=...,count=...,dropped_edges=...`
+
+### BNO08x (IMU) Wiring + Notes
+
+- Connect IMU `SDA` -> Arduino `SDA`
+- Connect IMU `SCL` -> Arduino `SCL`
+- Connect IMU `3V3` -> Arduino `3.3V` (recommended for BNO08x breakouts)
+- Connect IMU `GND` -> Arduino `GND`
+
+To compile/upload (adapt `<FQBN>` and port as above):
+
+```bash
+arduino-cli compile --fqbn <FQBN> realtime-arduino/bno08x_reader
+arduino-cli upload -p /dev/ttyACM1 --fqbn <FQBN> realtime-arduino/bno08x_reader
+```
+
+Library requirement (Arduino IDE Library Manager):
+- `Adafruit BNO08x`
+- `Adafruit BusIO`
