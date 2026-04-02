@@ -36,7 +36,17 @@ void setup() {
   delay(300);
 
   printBanner();
-  Serial.println("Target board: Arduino UNO (self-check)");
+#if defined(ARDUINO_UNOWIFIR4)
+  Serial.println("Target board: Arduino UNO R4 WiFi (self-check)");
+#elif defined(ARDUINO_MINIMA)
+  Serial.println("Target board: Arduino UNO R4 Minima (self-check)");
+#elif defined(ARDUINO_NANO_R4)
+  Serial.println("Target board: Arduino Nano R4 (self-check)");
+#elif defined(ARDUINO_AVR_MEGA2560) || defined(__AVR_ATmega2560__)
+  Serial.println("Target board: Arduino Mega 2560 (self-check)");
+#else
+  Serial.println("Target board: Arduino UNO-class (self-check)");
+#endif
   Serial.println("Boot OK");
 }
 

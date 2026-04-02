@@ -11,9 +11,9 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
   - DRDY falling-edge interrupt sampling
   - Continuous streaming output lines: `DATA,timestamp_us,raw,mV`
   - Periodic stream stats lines: `STATS,fps=...,count=...,dropped_edges=...`
-- `bno08x_reader/bno08x_reader.ino`
-  - BNO08x IMU reader over I2C (`SDA`/`SCL`)
-  - Outputs CSV: `IMU,t_us,ax,ay,az,gx,gy,gz,qw,qx,qy,qz`
+- `bno055_reader/bno055_reader.ino`
+  - BNO055 IMU over I2C (`SDA`/`SCL`)
+  - Outputs CSV: `IMU,t_us,lax,lay,laz,gx,gy,gz,qw,qx,qy,qz` (linear accel, gyro, quaternion)
 - `stream_logger.py`
   - Laptop-side logger that waits on serial stream and records CSV
 
@@ -116,20 +116,21 @@ python realtime-arduino/stream_logger.py --port /dev/ttyACM1 --baud 230400 --out
 - Periodic status lines:
   - `STATS,fps=...,count=...,dropped_edges=...`
 
-### BNO08x (IMU) Wiring + Notes
+### BNO055 (IMU) Wiring + Notes
 
-- Connect IMU `SDA` -> Arduino `SDA`
-- Connect IMU `SCL` -> Arduino `SCL`
-- Connect IMU `3V3` -> Arduino `3.3V` (recommended for BNO08x breakouts)
-- Connect IMU `GND` -> Arduino `GND`
+- Connect IMU `SDA` -> Arduino `SDA` (UNO R4: labeled SDA, often D14)
+- Connect IMU `SCL` -> Arduino `SCL` (UNO R4: labeled SCL, often D15)
+- Connect IMU `3V3` (or `VIN` per breakout) and `GND` per your board datasheet
+- Default I2C address is usually `0x28` (`BNO055_ADDRESS_A`); some boards use `0x29`
 
-To compile/upload (adapt `<FQBN>` and port as above):
+**UNO R4 WiFi** — compile/upload example (adapt port from `arduino-cli board list`):
 
 ```bash
-arduino-cli compile --fqbn <FQBN> realtime-arduino/bno08x_reader
-arduino-cli upload -p /dev/ttyACM1 --fqbn <FQBN> realtime-arduino/bno08x_reader
+arduino-cli compile --fqbn arduino:renesas_uno:unor4wifi realtime-arduino/bno055_reader
+arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:renesas_uno:unor4wifi realtime-arduino/bno055_reader
+arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
-Library requirement (Arduino IDE Library Manager):
-- `Adafruit BNO08x`
-- `Adafruit BusIO`
+Library (Library Manager or `arduino-cli lib install "Adafruit BNO055"`):
+- `Adafruit BNO055`
+- `Adafruit Unified Sensor` (dependency)
