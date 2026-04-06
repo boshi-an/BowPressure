@@ -1,10 +1,68 @@
 #include <SPI.h>
 #include <Wire.h>
 #include "DFRobot_BNO055.h"
-#include "imu_burst.h"
+
+// Must appear before any function definitions: Arduino injects prototypes after includes,
+// so these types must be visible before generated `adsSetInputMode` / `adsConfigAdc1` protos.
+enum class InputMode : uint8_t {
+  SingleEnded = 0,  // AINx vs AINCOM
+  Differential = 1  // AINp vs AINn
+};
+
+enum class FilterMode : uint8_t {
+  FIR = 0x84,
+  Sinc1 = 0x04,
+  Sinc2 = 0x24,
+  Sinc3 = 0x44,
+  Sinc4 = 0x64
+};
 
 typedef DFRobot_BNO055_IIC BNO;
 BNO* g_bno = nullptr;
+
+static const uint8_t kBnoI2cAddr = 0x28;
+
+// --- BNO055 configuration (CONFIG mode; DFRobot_BNO055 / Bosch BNO055) ---
+static const BNO::eAccRange_t kAccRange = BNO::eAccRange_4G;
+static const BNO::eGyrRange_t kGyrRange = BNO::eGyrRange_500;
+static const BNO::eAccBandWidth_t kAccBandWidth = BNO::eAccBandWidth_1000;
+static const BNO::eGyrBandWidth_t kGyrBandWidth = BNO::eGyrBandWidth_523;
+
+static void configureBno055(BNO* bno) {
+  bno->setOprMode(BNO::eOprModeConfig);
+  bno->setAccRange(kAccRange);
+  bno->setGyrRange(kGyrRange);
+  bno->setPowerMode(BNO::ePowerModeNormal);
+  bno->setAccPowerMode(BNO::eAccPowerModeNormal);
+  bno->setGyrPowerMode(BNO::eGyrPowerModeNormal);
+  bno->setAccBandWidth(kAccBandWidth);
+  bno->setGyrBandWidth(kGyrBandWidth);
+  bno->setOprMode(BNO::eOprModeAccGyro);
+  delay(2000);
+}
+
+void printLastOperateStatus(BNO::eStatus_t eStatus) {
+  switch (eStatus) {
+  case BNO::eStatusOK:
+    Serial.println(F("everything ok"));
+    break;
+  case BNO::eStatusErr:
+    Serial.println(F("unknow error"));
+    break;
+  case BNO::eStatusErrDeviceNotDetect:
+    Serial.println(F("device not detected"));
+    break;
+  case BNO::eStatusErrDeviceReadyTimeOut:
+    Serial.println(F("device ready time out"));
+    break;
+  case BNO::eStatusErrDeviceStatus:
+    Serial.println(F("device internal status error"));
+    break;
+  default:
+    Serial.println(F("unknow status"));
+    break;
+  }
+}
 
 // ===== Pin mapping (Arduino UNO) =====
 constexpr uint8_t PIN_CS = 10;   // CS to ADS1263 (UNO HW SS)
@@ -38,34 +96,6 @@ constexpr uint8_t REG_INPMUX = 0x06;  // [7:4]=AINP [3:0]=AINN
 constexpr uint8_t REG_REFMUX = 0x0F;  // use AVDD/AVSS by default
 
 constexpr uint8_t AINCOM = 0x0A;
-
-enum class InputMode : uint8_t {
-  SingleEnded = 0,  // AINx vs AINCOM
-  Differential = 1  // AINp vs AINn
-};
-
-enum class FilterMode : uint8_t {
-  FIR = 0x84,
-  Sinc1 = 0x04,
-  Sinc2 = 0x24,
-  Sinc3 = 0x44,
-  Sinc4 = 0x64
-};
-
-// On-chip gyro bandwidth (BNO055 GYR_CONFIG0). `begin()` uses ~32 Hz by default.
-// Options: eGyrBandWidth_523, _230, _116, _47, _23, _12, _64, _32 (lower ≈ stronger LPF).
-static constexpr DFRobot_BNO055::eGyrBandWidth_t kGyroBandwidth =
-    DFRobot_BNO055::eGyrBandWidth_116;
-
-static void applyGyroBandwidth(BNO* imu) {
-  if (imu == nullptr) return;
-  imu->setOprMode(BNO::eOprModeConfig);
-  delay(25);
-  imu->setGyrBandWidth(kGyroBandwidth);
-  delay(10);
-  imu->setOprMode(BNO::eOprModeAccGyro);
-  delay(50);
-}
 
 // DR code table from ADS1263 MODE2.DR[3:0] setting.
 // This helper focuses on common rates and picks the nearest one.
@@ -253,17 +283,22 @@ void setup() {
   while (!Serial) { delay(10); }
 
   Wire.begin();
-  Wire.setClock(10000);
+  Wire.setClock(50000);
 
-  g_bno = new BNO(&Wire, 0x28);
+  g_bno = new BNO(&Wire, kBnoI2cAddr);
   g_bno->reset();
 
   while (g_bno->begin() != BNO::eStatusOK) {
-    Serial.println("bno begin failed, retrying...");
+    Serial.println(F("bno begin failed, retrying..."));
+    printLastOperateStatus(g_bno->lastOperateStatus);
     delay(2000);
   }
-  applyGyroBandwidth(g_bno);
-  Serial.println("bno begin success");
+  Serial.println(F("bno begin success"));
+
+  configureBno055(g_bno);
+  Serial.println(
+      F("configured: ACCGYRO, 4g / 500 dps, NORMAL power; IMU via getAxis (acc, gyr)"));
+  Wire.setClock(50000);
 
   adsInit();
 
@@ -292,6 +327,7 @@ void setup() {
   Serial.println(
       F("# DATA: timestamp_us,raw,mV,acc_x,acc_y,acc_z,gyr_x,gyr_y,gyr_z | acc=mg gyr=dps"));
 }
+
 void loop() {
   bool hasSample = false;
   uint32_t tsUs = 0;
@@ -309,31 +345,23 @@ void loop() {
 
     if (g_bno == nullptr) return;
 
-    BnoRawSample imu;
-    if (!bnoReadBurst(imu)) {
-      Serial.println("IMU read error");
-      return;
-    }
+    BNO::sAxisAnalog_t sAcc = g_bno->getAxis(BNO::eAxisAcc);
+    BNO::sAxisAnalog_t sGyr = g_bno->getAxis(BNO::eAxisGyr);
 
-    float gyr_x = imu.gyr_x / 16.0f;
-    float gyr_y = imu.gyr_y / 16.0f;
-    float gyr_z = imu.gyr_z / 16.0f;
-
-    ++g_streamCount;  // <-- also move this back in, it was lost in the refactor
+    ++g_streamCount;
 
     Serial.print(F("DATA,"));
     Serial.print(tsUs);      Serial.print(',');
     Serial.print(raw);       Serial.print(',');
     Serial.print(mv, 3);     Serial.print(',');
-    Serial.print(imu.acc_x); Serial.print(',');
-    Serial.print(imu.acc_y); Serial.print(',');
-    Serial.print(imu.acc_z); Serial.print(',');
-    Serial.print(gyr_x, 2);  Serial.print(',');
-    Serial.print(gyr_y, 2);  Serial.print(',');
-    Serial.println(gyr_z, 2);
-  }  // <-- closing brace for if (hasSample)
+    Serial.print((int)round(sAcc.x)); Serial.print(',');
+    Serial.print((int)round(sAcc.y)); Serial.print(',');
+    Serial.print((int)round(sAcc.z)); Serial.print(',');
+    Serial.print(sGyr.x, 2);  Serial.print(',');
+    Serial.print(sGyr.y, 2);  Serial.print(',');
+    Serial.println(sGyr.z, 2);
+  }
 
-  // Stats block is OUTSIDE if (hasSample) so it fires every second regardless
   uint32_t nowMs = millis();
   if (nowMs - g_lastStatsMs >= STREAM_STATS_INTERVAL_MS) {
     uint32_t dCount = g_streamCount - g_lastStatsCount;
@@ -344,11 +372,11 @@ void loop() {
     dropped = g_droppedEdges;
     interrupts();
 
-    Serial.print("STATS,fps=");
+    Serial.print(F("STATS,fps="));
     Serial.print(fps, 2);
-    Serial.print(",count=");
+    Serial.print(F(",count="));
     Serial.print(g_streamCount);
-    Serial.print(",dropped_edges=");
+    Serial.print(F(",dropped_edges="));
     Serial.println(dropped);
 
     g_lastStatsMs = nowMs;

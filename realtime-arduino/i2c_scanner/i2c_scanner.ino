@@ -3,7 +3,7 @@
 // Simple I2C scanner.
 // Prints all 7-bit addresses that ACK on the bus.
 
-constexpr uint32_t SERIAL_BAUD = 115200;
+constexpr uint32_t SERIAL_BAUD = 230400;
 
 void setup() {
   Serial.begin(SERIAL_BAUD);
@@ -46,4 +46,3 @@ void loop() {
   Serial.println("Rescanning in 2 seconds...\n");
   delay(2000);
 }
-

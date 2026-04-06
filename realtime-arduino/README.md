@@ -12,8 +12,9 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
   - Continuous streaming output lines: `DATA,timestamp_us,raw,mV`
   - Periodic stream stats lines: `STATS,fps=...,count=...,dropped_edges=...`
 - `bno055_reader/bno055_reader.ino`
-  - BNO055 IMU over I2C (`SDA`/`SCL`)
-  - Outputs CSV: `IMU,t_us,lax,lay,laz,gx,gy,gz,qw,qx,qy,qz` (linear accel, gyro, quaternion)
+  - BNO055 IMU over I2C (`SDA`/`SCL`), **no third-party IMU library** (raw register I²C)
+  - **ACCGYRO** mode only; configurable accel G-range, gyro °/s range, and both sensors’ bandwidth (see `bno055_reader/BNO055_ACC_GYRO.md`)
+  - Outputs CSV: `t_ms,acc_x,acc_y,acc_z,gyr_x,gyr_y,gyr_z` (units: mg, dps)
 - `stream_logger.py`
   - Laptop-side logger that waits on serial stream and records CSV
 
@@ -131,6 +132,4 @@ arduino-cli upload -p /dev/ttyACM0 --fqbn arduino:renesas_uno:unor4wifi realtime
 arduino-cli monitor -p /dev/ttyACM0 -c baudrate=115200
 ```
 
-Library (Library Manager or `arduino-cli lib install "Adafruit BNO055"`):
-- `Adafruit BNO055`
-- `Adafruit Unified Sensor` (dependency)
+No extra libraries are required for `bno055_reader` (uses `Wire` only).
