@@ -69,7 +69,7 @@ void printLastOperateStatus(BNO::eStatus_t eStatus) {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(230400);
   Serial.println("bno055_reader setup");
   g_bno = new BNO(&Wire, 0x28);
   g_bno->reset();

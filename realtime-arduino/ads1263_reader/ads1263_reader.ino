@@ -1,10 +1,14 @@
 #include <SPI.h>
 
-// ===== Pin mapping (Arduino UNO) =====
-constexpr uint8_t PIN_CS = 10;   // CS to ADS1263 (UNO HW SS)
-constexpr uint8_t PIN_DRDY = 2;  // DRDY (must be input; UNO supports INT0 on D2)
-constexpr uint8_t PIN_RST = 4;   // RESET pin on AD HAT
-constexpr uint8_t PIN_HW_SS = 10;  // UNO hardware SS must be output
+// ===== Pin mapping (keep UNO wiring on all boards) =====
+constexpr uint8_t PIN_CS = 10;   // ADS1263 CS (same as UNO wiring)
+constexpr uint8_t PIN_DRDY = 2;  // DRDY to D2 (same as UNO wiring)
+constexpr uint8_t PIN_RST = 4;   // ADS1263 RESET (same as UNO wiring)
+#if defined(ARDUINO_AVR_MEGA2560)
+constexpr uint8_t PIN_HW_SS = 53;  // Mega SPI master pin (internal requirement)
+#else
+constexpr uint8_t PIN_HW_SS = 10;  // UNO/R4 SPI master pin
+#endif
 constexpr float ADC_REF_MV = 5000.0f;  // Set to measured AVDD in mV for accuracy
 constexpr uint8_t DIFF_AIN_P = 0;      // Differential + input: IN0
 constexpr uint8_t DIFF_AIN_N = 1;      // Differential - input: IN1
@@ -245,13 +249,24 @@ void setup() {
       FilterMode::Sinc1   // filter mode
   );
 
-  attachInterrupt(digitalPinToInterrupt(PIN_DRDY), onDrdyFalling, FALLING);
+  const int drdyInterrupt = digitalPinToInterrupt(PIN_DRDY);
+  if (drdyInterrupt < 0) {
+    Serial.println("Error: PIN_DRDY does not support external interrupt");
+    while (true) {
+      delay(1000);
+    }
+  }
+  attachInterrupt(drdyInterrupt, onDrdyFalling, FALLING);
   adsWriteCommand(CMD_START1);
   delay(10);
 
   g_lastStatsMs = millis();
 
-  Serial.println("Target board: Arduino UNO");
+#if defined(ARDUINO_AVR_MEGA2560)
+  Serial.println("Target board: Arduino Mega 2560");
+#else
+  Serial.println("Target board: Arduino UNO-class");
+#endif
   Serial.print("ADC1 differential input: IN");
   Serial.print(DIFF_AIN_P);
   Serial.print(" - IN");
