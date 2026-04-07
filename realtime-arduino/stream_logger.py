@@ -10,7 +10,7 @@ import math
 import sys
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Iterator, Optional
 
 import serial
@@ -37,8 +37,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--plot-window-s",
         type=float,
-        default=10.0,
+        default=5.0,
         help="Time window in seconds for real-time plot",
+    )
+    p.add_argument(
+        "--aang-ema-alpha",
+        type=float,
+        default=0.20,
+        help="EMA alpha for angular acceleration d(gyro)/dt (0..1, lower=smoother)",
+    )
+    p.add_argument(
+        "--mv-ema-alpha",
+        type=float,
+        default=0.20,
+        help="EMA alpha for voltage mV (0..1, lower=smoother)",
     )
     return p.parse_args()
 
@@ -50,13 +62,21 @@ class ProcessedSample:
     arduino_us: int
     raw: int
     mv: float
-    csv_row: list
+    csv_row: list = field(default_factory=list)
+    mv_raw: float = 0.0
+    mv_smooth: float = 0.0
     acc_x: float = 0.0
     acc_y: float = 0.0
     acc_z: float = 0.0
+    gyr_x: float = 0.0
+    gyr_y: float = 0.0
+    gyr_z: float = 0.0
     aang_x: float = 0.0
     aang_y: float = 0.0
     aang_z: float = 0.0
+    aang_raw_x: float = 0.0
+    aang_raw_y: float = 0.0
+    aang_raw_z: float = 0.0
 
 
 class StreamDataProcessor:
@@ -65,30 +85,51 @@ class StreamDataProcessor:
     Angular acceleration for plotting is d(gyro)/dt (deg/s²). Pass-through otherwise.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, aang_ema_alpha: float = 0.20, mv_ema_alpha: float = 0.20) -> None:
         self._prev_gyr: Optional[tuple[float, float, float]] = None
         self._prev_us_for_aang: Optional[int] = None
+        self._aang_alpha = max(0.0, min(1.0, float(aang_ema_alpha)))
+        self._aang_ema: Optional[tuple[float, float, float]] = None
+        self._mv_alpha = max(0.0, min(1.0, float(mv_ema_alpha)))
+        self._mv_ema: Optional[float] = None
 
     def process(self, parts: list[str], stream_format: str) -> Optional[ProcessedSample]:
         try:
             arduino_us = int(parts[1])
             raw = int(parts[2])
-            mv = float(parts[3])
+            mv_raw = float(parts[3])
         except (ValueError, IndexError):
             return None
 
         now_epoch = time.time()
         now_iso = dt.datetime.now().isoformat(timespec="milliseconds")
 
+        if self._mv_ema is None:
+            self._mv_ema = mv_raw
+        else:
+            a_mv = self._mv_alpha
+            self._mv_ema = a_mv * mv_raw + (1.0 - a_mv) * self._mv_ema
+        mv_smooth = self._mv_ema
+
         acc_x = acc_y = acc_z = 0.0
         aang_x = aang_y = aang_z = float("nan")
+        gyr_x = gyr_y = gyr_z = float("nan")
 
         if stream_format == "ads":
-            row = [now_iso, f"{now_epoch:.6f}", arduino_us, raw, f"{mv:.3f}"]
+            row = [
+                now_iso,
+                f"{now_epoch:.6f}",
+                arduino_us,
+                raw,
+                f"{mv_raw:.3f}",
+                f"{mv_smooth:.3f}",
+            ]
             return ProcessedSample(
                 arduino_us=arduino_us,
                 raw=raw,
-                mv=mv,
+                mv=mv_smooth,
+                mv_raw=mv_raw,
+                mv_smooth=mv_smooth,
                 csv_row=row,
             )
 
@@ -102,6 +143,7 @@ class StreamDataProcessor:
         except (ValueError, IndexError):
             return None
 
+        aang_raw_x = aang_raw_y = aang_raw_z = float("nan")
         if (
             self._prev_gyr is not None
             and self._prev_us_for_aang is not None
@@ -109,9 +151,21 @@ class StreamDataProcessor:
         ):
             dt_s = (arduino_us - self._prev_us_for_aang) / 1_000_000.0
             if dt_s > 1e-9:
-                aang_x = (gyr_x - self._prev_gyr[0]) / dt_s
-                aang_y = (gyr_y - self._prev_gyr[1]) / dt_s
-                aang_z = (gyr_z - self._prev_gyr[2]) / dt_s
+                aang_raw_x = (gyr_x - self._prev_gyr[0]) / dt_s
+                aang_raw_y = (gyr_y - self._prev_gyr[1]) / dt_s
+                aang_raw_z = (gyr_z - self._prev_gyr[2]) / dt_s
+                aang_x = aang_raw_x
+                aang_y = aang_raw_y
+                aang_z = aang_raw_z
+                if self._aang_ema is None:
+                    self._aang_ema = (aang_x, aang_y, aang_z)
+                else:
+                    ax_prev, ay_prev, az_prev = self._aang_ema
+                    a = self._aang_alpha
+                    aang_x = a * aang_x + (1.0 - a) * ax_prev
+                    aang_y = a * aang_y + (1.0 - a) * ay_prev
+                    aang_z = a * aang_z + (1.0 - a) * az_prev
+                    self._aang_ema = (aang_x, aang_y, aang_z)
         self._prev_gyr = (gyr_x, gyr_y, gyr_z)
         self._prev_us_for_aang = arduino_us
 
@@ -120,25 +174,40 @@ class StreamDataProcessor:
             f"{now_epoch:.6f}",
             arduino_us,
             raw,
-            f"{mv:.3f}",
+            f"{mv_raw:.3f}",
+            f"{mv_smooth:.3f}",
             f"{acc_x:.6f}",
             f"{acc_y:.6f}",
             f"{acc_z:.6f}",
             f"{gyr_x:.6f}",
             f"{gyr_y:.6f}",
             f"{gyr_z:.6f}",
+            f"{aang_raw_x:.6f}" if not math.isnan(aang_raw_x) else "",
+            f"{aang_raw_y:.6f}" if not math.isnan(aang_raw_y) else "",
+            f"{aang_raw_z:.6f}" if not math.isnan(aang_raw_z) else "",
+            f"{aang_x:.6f}" if not math.isnan(aang_x) else "",
+            f"{aang_y:.6f}" if not math.isnan(aang_y) else "",
+            f"{aang_z:.6f}" if not math.isnan(aang_z) else "",
         ]
         return ProcessedSample(
             arduino_us=arduino_us,
             raw=raw,
-            mv=mv,
+            mv=mv_smooth,
+            mv_raw=mv_raw,
+            mv_smooth=mv_smooth,
             csv_row=row,
             acc_x=acc_x,
             acc_y=acc_y,
             acc_z=acc_z,
+            gyr_x=gyr_x,
+            gyr_y=gyr_y,
+            gyr_z=gyr_z,
             aang_x=aang_x,
             aang_y=aang_y,
             aang_z=aang_z,
+            aang_raw_x=aang_raw_x,
+            aang_raw_y=aang_raw_y,
+            aang_raw_z=aang_raw_z,
         )
 
 
@@ -150,20 +219,28 @@ class CsvStreamSaver:
         "host_epoch_s",
         "arduino_timestamp_us",
         "raw",
-        "mV",
+        "mV_raw",
+        "mV_ema",
     ]
     _HEADER_ADS_IMU = [
         "host_iso_time",
         "host_epoch_s",
         "arduino_timestamp_us",
         "raw",
-        "mV",
+        "mV_raw",
+        "mV_ema",
         "acc_x_mg",
         "acc_y_mg",
         "acc_z_mg",
         "gyr_x_dps",
         "gyr_y_dps",
         "gyr_z_dps",
+        "aang_x_raw_dps2",
+        "aang_y_raw_dps2",
+        "aang_z_raw_dps2",
+        "aang_x_ema_dps2",
+        "aang_y_ema_dps2",
+        "aang_z_ema_dps2",
     ]
 
     def __init__(self, path: str) -> None:
@@ -235,17 +312,24 @@ class StreamPlotter:
         self._fig: Any = None
         self._axes: Any = None
         self._line_mv: Any = None
+        self._line_dt_us: Any = None
         self._lines_acc: list[Any] = []
+        self._lines_gyr: list[Any] = []
         self._lines_aang: list[Any] = []
         self._plot_layout: Optional[str] = None
         self._plot_elapsed: deque[float] = deque()
         self._plot_mv: deque[float] = deque()
+        self._plot_dt_us: deque[float] = deque()
         self._plot_acc_x: deque[float] = deque()
         self._plot_acc_y: deque[float] = deque()
         self._plot_acc_z: deque[float] = deque()
+        self._plot_gyr_x: deque[float] = deque()
+        self._plot_gyr_y: deque[float] = deque()
+        self._plot_gyr_z: deque[float] = deque()
         self._plot_aang_x: deque[float] = deque()
         self._plot_aang_y: deque[float] = deque()
         self._plot_aang_z: deque[float] = deque()
+        self._prev_arduino_us_for_plot: Optional[int] = None
         self._update_counter = 0
         self._enabled = True
 
@@ -272,18 +356,25 @@ class StreamPlotter:
         self._plot_layout = layout
         plt.ion()
         if layout == "ads":
-            self._fig, ax0 = plt.subplots(figsize=(10, 4))
-            self._axes = ax0
-            (self._line_mv,) = ax0.plot([], [], linewidth=1.0, color="tab:blue")
-            ax0.set_xlabel("Elapsed Time (s)")
-            ax0.set_ylabel("mV")
-            ax0.set_title("ADS1263 (real-time)")
-            ax0.grid(True, alpha=0.3)
+            self._fig, axs = plt.subplots(2, 1, sharex=True, figsize=(10, 6))
+            self._axes = axs
+            (self._line_mv,) = axs[0].plot([], [], linewidth=1.0, color="tab:blue")
+            axs[0].set_ylabel("mV")
+            axs[0].set_title("ADS1263 (real-time)")
+            axs[0].grid(True, alpha=0.3)
+            (self._line_dt_us,) = axs[1].plot(
+                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
+            )
+            axs[1].set_xlabel("Elapsed Time (s)")
+            axs[1].set_ylabel("delta us")
+            axs[1].legend(loc="upper right", fontsize=8)
+            axs[1].grid(True, alpha=0.3)
             self._lines_acc = []
+            self._lines_gyr = []
             self._lines_aang = []
             self._fig.tight_layout()
         else:
-            self._fig, axs = plt.subplots(3, 1, sharex=True, figsize=(10, 8))
+            self._fig, axs = plt.subplots(5, 1, sharex=True, figsize=(10, 11))
             self._axes = axs
             (self._line_mv,) = axs[0].plot([], [], linewidth=1.0, color="tab:blue")
             axs[0].set_ylabel("mV")
@@ -306,15 +397,30 @@ class StreamPlotter:
                     [],
                     linewidth=1.0,
                     color=colors[i],
-                    linestyle="--",
                     label=f"{lab} (deg/s²)",
                 )
                 self._lines_aang.append(ln)
             axs[2].set_ylabel("Angular accel. (deg/s²)")
-            axs[2].set_xlabel("Elapsed Time (s)")
             axs[2].legend(loc="upper right", fontsize=8)
             axs[2].grid(True, alpha=0.3)
+            self._lines_gyr = []
+            for i, lab in enumerate(("gyr_x", "gyr_y", "gyr_z")):
+                (ln,) = axs[3].plot(
+                    [], [], linewidth=1.0, color=colors[i], label=f"{lab} (dps)"
+                )
+                self._lines_gyr.append(ln)
+            axs[3].set_ylabel("Angular velocity (dps)")
+            axs[3].legend(loc="upper right", fontsize=8)
+            axs[3].grid(True, alpha=0.3)
+            (self._line_dt_us,) = axs[4].plot(
+                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
+            )
+            axs[4].set_ylabel("delta us")
+            axs[4].set_xlabel("Elapsed Time (s)")
+            axs[4].legend(loc="upper right", fontsize=8)
+            axs[4].grid(True, alpha=0.3)
             self._fig.tight_layout()
+        self._prev_arduino_us_for_plot = None
 
     def on_sample(
         self,
@@ -330,16 +436,26 @@ class StreamPlotter:
         arduino_us = sample.arduino_us
         mv = sample.mv
         elapsed_s = (arduino_us - first_arduino_us) / 1_000_000.0
+        if self._prev_arduino_us_for_plot is None:
+            dt_us = 0.0
+        else:
+            dt_us = float(arduino_us - self._prev_arduino_us_for_plot)
+        self._prev_arduino_us_for_plot = arduino_us
         self._plot_elapsed.append(elapsed_s)
         self._plot_mv.append(mv)
+        self._plot_dt_us.append(dt_us)
         min_time = max(0.0, elapsed_s - self._plot_window_s)
         while self._plot_elapsed and self._plot_elapsed[0] < min_time:
             self._plot_elapsed.popleft()
             self._plot_mv.popleft()
+            self._plot_dt_us.popleft()
             if stream_format == "ads_imu":
                 self._plot_acc_x.popleft()
                 self._plot_acc_y.popleft()
                 self._plot_acc_z.popleft()
+                self._plot_gyr_x.popleft()
+                self._plot_gyr_y.popleft()
+                self._plot_gyr_z.popleft()
                 self._plot_aang_x.popleft()
                 self._plot_aang_y.popleft()
                 self._plot_aang_z.popleft()
@@ -348,6 +464,9 @@ class StreamPlotter:
             self._plot_acc_x.append(sample.acc_x)
             self._plot_acc_y.append(sample.acc_y)
             self._plot_acc_z.append(sample.acc_z)
+            self._plot_gyr_x.append(sample.gyr_x)
+            self._plot_gyr_y.append(sample.gyr_y)
+            self._plot_gyr_z.append(sample.gyr_z)
             self._plot_aang_x.append(
                 sample.aang_x if not math.isnan(sample.aang_x) else 0.0
             )
@@ -363,17 +482,28 @@ class StreamPlotter:
             return
         self._update_counter = 0
 
-        if stream_format == "ads" and self._line_mv is not None and self._axes is not None:
+        if (
+            stream_format == "ads"
+            and self._line_mv is not None
+            and self._line_dt_us is not None
+            and self._axes is not None
+        ):
             self._line_mv.set_data(list(self._plot_elapsed), list(self._plot_mv))
+            self._line_dt_us.set_data(list(self._plot_elapsed), list(self._plot_dt_us))
             if self._plot_elapsed:
-                self._axes.set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
-                y_min = min(self._plot_mv)
-                y_max = max(self._plot_mv)
-                if y_min == y_max:
-                    y_min -= 1.0
-                    y_max += 1.0
-                pad = 0.05 * (y_max - y_min)
-                self._axes.set_ylim(y_min - pad, y_max + pad)
+                axs = self._axes
+                axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
+                for axi, series in ((axs[0], [self._plot_mv]), (axs[1], [self._plot_dt_us])):
+                    flat = [x for dq in series for x in dq]
+                    if not flat:
+                        continue
+                    y_min = min(flat)
+                    y_max = max(flat)
+                    if y_min == y_max:
+                        y_min -= 1.0
+                        y_max += 1.0
+                    pad = 0.05 * (y_max - y_min)
+                    axi.set_ylim(y_min - pad, y_max + pad)
             self._fig.canvas.draw_idle()
             plt.pause(0.001)
         elif (
@@ -381,17 +511,23 @@ class StreamPlotter:
             and self._fig is not None
             and self._axes is not None
             and self._line_mv is not None
+            and self._line_dt_us is not None
             and len(self._lines_acc) == 3
             and len(self._lines_aang) == 3
+            and len(self._lines_gyr) == 3
         ):
             t = list(self._plot_elapsed)
             self._line_mv.set_data(t, list(self._plot_mv))
             self._lines_acc[0].set_data(t, list(self._plot_acc_x))
             self._lines_acc[1].set_data(t, list(self._plot_acc_y))
             self._lines_acc[2].set_data(t, list(self._plot_acc_z))
+            self._lines_gyr[0].set_data(t, list(self._plot_gyr_x))
+            self._lines_gyr[1].set_data(t, list(self._plot_gyr_y))
+            self._lines_gyr[2].set_data(t, list(self._plot_gyr_z))
             self._lines_aang[0].set_data(t, list(self._plot_aang_x))
             self._lines_aang[1].set_data(t, list(self._plot_aang_y))
             self._lines_aang[2].set_data(t, list(self._plot_aang_z))
+            self._line_dt_us.set_data(t, list(self._plot_dt_us))
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
@@ -399,6 +535,8 @@ class StreamPlotter:
                     (axs[0], [self._plot_mv]),
                     (axs[1], [self._plot_acc_x, self._plot_acc_y, self._plot_acc_z]),
                     (axs[2], [self._plot_aang_x, self._plot_aang_y, self._plot_aang_z]),
+                    (axs[3], [self._plot_gyr_x, self._plot_gyr_y, self._plot_gyr_z]),
+                    (axs[4], [self._plot_dt_us]),
                 ):
                     flat = [x for dq in series for x in dq]
                     if not flat:
@@ -434,7 +572,10 @@ def main() -> int:
     dt_count = 0
 
     stream_format: Optional[str] = None
-    processor = StreamDataProcessor()
+    processor = StreamDataProcessor(
+        aang_ema_alpha=args.aang_ema_alpha,
+        mv_ema_alpha=args.mv_ema_alpha,
+    )
     plotter = StreamPlotter(args.plot_window_s) if args.plot else None
 
     print(f"Opening {args.port} @ {args.baud}...")

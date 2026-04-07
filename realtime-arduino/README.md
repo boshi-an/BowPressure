@@ -15,6 +15,9 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
   - BNO055 IMU over I2C (`SDA`/`SCL`), **no third-party IMU library** (raw register I²C)
   - **ACCGYRO** mode only; configurable accel G-range, gyro °/s range, and both sensors’ bandwidth (see `bno055_reader/BNO055_ACC_GYRO.md`)
   - Outputs CSV: `t_ms,acc_x,acc_y,acc_z,gyr_x,gyr_y,gyr_z` (units: mg, dps)
+- `ltc_reader/ltc_reader.ino`
+  - Reads LTC (Linear Timecode) on `D2` (UNO `INT0`, edge interrupt)
+  - Prints current decoded SMPTE timecode lines: `HH:MM:SS:FF`
 - `stream_logger.py`
   - Laptop-side logger that waits on serial stream and records CSV
 
@@ -71,6 +74,12 @@ Compile self-check (pick the right FQBN for your board):
 
 ```bash
 arduino-cli compile --fqbn <FQBN> realtime-arduino/arduino_self_check
+```
+
+Compile LTC reader:
+
+```bash
+arduino-cli compile --fqbn <FQBN> realtime-arduino/ltc_reader
 ```
 
 Upload ADS1263 reader:
