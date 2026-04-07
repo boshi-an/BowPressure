@@ -30,7 +30,7 @@ Arduino sketches for the Waveshare High-Precision AD HAT (ADS1263), tested with 
 - `D2` -> `DRDY`
 - `D4` -> `RESET` / `REST`
 - `5V` -> `AVDD` (analog supply)
-- `3.3V` -> `VCC` (digital logic supply)
+- `5V` -> `VCC` (digital logic supply)
 - `GND` -> `AVSS` (or `COM` if AVSS-COM is already tied)
 
 ### Wiring (Mega 2560 -> AD HAT)
