@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,9 +33,10 @@ import pandas as pd
 
 from acceleration_compensation.recordings import load_recorded_csv
 
-ACC_COLS = ("acc_x_mg", "acc_y_mg", "acc_z_mg")
-GYR_COLS = ("gyr_x_dps", "gyr_y_dps", "gyr_z_dps")
-TARGET_COL = "mV"
+ACC_COLS = ("acc_x_ema_mg", "acc_y_ema_mg", "acc_z_ema_mg")
+GYR_COLS = ("gyr_x_ema_dps", "gyr_y_ema_dps", "gyr_z_ema_dps")
+AANG_COLS = ("aang_x_ema_dps2", "aang_y_ema_dps2", "aang_z_ema_dps2")
+TARGET_COL = "mV_ema"
 
 N_PAST = 2
 N_FUTURE = 2
@@ -92,20 +94,6 @@ def load_data(csv_files: list[Path]) -> pd.DataFrame:
     return df
 
 
-def angular_acceleration_dps2(
-    gyr: np.ndarray,
-    ts_us: np.ndarray,
-) -> np.ndarray:
-    """d(gyro)/dt in deg/s²; first row is zero (no previous sample)."""
-    n = gyr.shape[0]
-    out = np.zeros_like(gyr, dtype=np.float64)
-    for i in range(1, n):
-        dt_s = (ts_us[i] - ts_us[i - 1]) / 1_000_000.0
-        if dt_s > 1e-9 and np.isfinite(dt_s):
-            out[i] = (gyr[i] - gyr[i - 1]) / dt_s
-    return out
-
-
 def frame_vector(
     acc_row: np.ndarray,
     gyr_row: np.ndarray,
@@ -124,7 +112,11 @@ def create_dataset(df: pd.DataFrame) -> StackedDataset:
     mV = df[TARGET_COL].to_numpy(dtype=np.float64)
     acc = df[list(ACC_COLS)].to_numpy(dtype=np.float64)
     gyr = df[list(GYR_COLS)].to_numpy(dtype=np.float64)
-    aang = angular_acceleration_dps2(gyr, ts_us)
+    if set(AANG_COLS).issubset(df.columns):
+        aang = df[list(AANG_COLS)].to_numpy(dtype=np.float64)
+    else:
+        # Backward compatibility for older CSVs without EMA angular acceleration.
+        aang = np.zeros_like(gyr, dtype=np.float64)
 
     n = len(mV)
     rows_x: list[np.ndarray] = []
@@ -254,6 +246,32 @@ def plot_fit(result: FitResult) -> None:
     plt.show()
 
 
+def save_coefficients(result: FitResult, csv_files: list[Path]) -> None:
+    """Save fitted coefficients to <csv_stem>_coef.json for each input CSV."""
+    weights = result.coef[:-1].tolist()
+    bias = float(result.coef[-1])
+    metrics = {k: float(v) for k, v in result.metrics.items()}
+    for csv_path in csv_files:
+        resolved = csv_path.expanduser().resolve()
+        out_path = resolved.with_name(f"{resolved.stem}_coef.json")
+        payload = {
+            "source_csv": str(resolved),
+            "target": TARGET_COL,
+            "n_past": N_PAST,
+            "n_future": N_FUTURE,
+            "n_frames": N_FRAMES,
+            "values_per_frame": VALUES_PER_FRAME,
+            "n_features": N_FEATURES,
+            "weights": weights,
+            "bias": bias,
+            "metrics": metrics,
+        }
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        print(f"Saved coefficients: {out_path}")
+
+
 def main() -> int:
     args = parse_args()
     try:
@@ -265,6 +283,7 @@ def main() -> int:
         return 1
 
     print_fit_results(result)
+    save_coefficients(result, list(args.csv_files))
     plot_fit(result)
     return 0
 

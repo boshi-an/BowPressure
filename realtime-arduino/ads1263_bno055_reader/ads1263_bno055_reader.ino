@@ -68,6 +68,7 @@ void printLastOperateStatus(BNO::eStatus_t eStatus) {
 constexpr uint8_t PIN_CS = 10;   // ADS1263 CS (same as UNO wiring)
 constexpr uint8_t PIN_DRDY = 2;  // DRDY to D2 (same as UNO wiring)
 constexpr uint8_t PIN_RST = 4;   // ADS1263 RESET (same as UNO wiring)
+constexpr uint8_t PIN_LTC = 3;   // LTC signal input (external interrupt pin on UNO)
 #if defined(ARDUINO_AVR_MEGA2560)
 constexpr uint8_t PIN_HW_SS = 53;  // Mega SPI master pin (internal requirement)
 #else
@@ -86,6 +87,24 @@ volatile uint32_t g_droppedEdges = 0;
 uint32_t g_streamCount = 0;
 uint32_t g_lastStatsMs = 0;
 uint32_t g_lastStatsCount = 0;
+
+// ===== LTC decoder state =====
+// Decodes LTC BMC edges on PIN_LTC and stores latest HH:MM:SS:FF.
+#define LTC_FPS 25
+#define HALF_BIT_US (1000000 / (LTC_FPS * 80 * 2))
+#define SHORT_MIN (HALF_BIT_US / 3)
+#define SHORT_MAX (HALF_BIT_US * 3 / 2)
+#define LONG_MAX (HALF_BIT_US * 3)
+
+volatile uint32_t g_ltcLastEdge = 0;
+volatile uint8_t g_ltcHalfCount = 0;
+volatile uint8_t g_ltcBitCount = 0;
+volatile uint8_t g_ltcBitBuf[10] = {0};
+volatile bool g_ltcFrameReady = false;
+volatile uint8_t g_ltcFrame[10] = {0};
+
+char g_ltcText[12] = "";
+bool g_ltcValid = false;
 
 // ===== ADS1263 command/register map (subset) =====
 constexpr uint8_t CMD_RESET = 0x06;
@@ -257,6 +276,68 @@ int32_t adsReadAdc1RawInline() {
                    ((uint32_t)b1 << 8) | (uint32_t)b0);
 }
 
+void ltcPushBit(uint8_t bit) {
+  for (int i = 0; i < 9; i++) {
+    g_ltcBitBuf[i] = (g_ltcBitBuf[i] >> 1) | ((g_ltcBitBuf[i + 1] & 0x01) << 7);
+  }
+  g_ltcBitBuf[9] = (g_ltcBitBuf[9] >> 1) | (bit << 7);
+
+  g_ltcBitCount++;
+  if (g_ltcBitCount > 80) g_ltcBitCount = 80;
+
+  uint16_t sync = ((uint16_t)g_ltcBitBuf[9] << 8) | g_ltcBitBuf[8];
+  if ((sync == 0xBFFC || sync == 0x3FFD) && g_ltcBitCount == 80) {
+    memcpy((void *)g_ltcFrame, (void *)g_ltcBitBuf, 10);
+    g_ltcFrameReady = true;
+    g_ltcBitCount = 0;
+    memset((void *)g_ltcBitBuf, 0, 10);
+  }
+}
+
+void onLtcEdge() {
+  uint32_t now = micros();
+  uint32_t duration = now - g_ltcLastEdge;
+  g_ltcLastEdge = now;
+
+  if (duration < SHORT_MIN || duration > LONG_MAX) {
+    g_ltcHalfCount = 0;
+    return;
+  }
+
+  if (duration <= SHORT_MAX) {
+    g_ltcHalfCount++;
+    if (g_ltcHalfCount == 2) {
+      g_ltcHalfCount = 0;
+      ltcPushBit(1);
+    }
+  } else {
+    g_ltcHalfCount = 0;
+    ltcPushBit(0);
+  }
+}
+
+void pollLtc() {
+  if (!g_ltcFrameReady) return;
+
+  uint8_t f[10];
+  noInterrupts();
+  memcpy(f, (void *)g_ltcFrame, 10);
+  g_ltcFrameReady = false;
+  interrupts();
+
+  uint8_t ff = (f[0] & 0x0F) + ((f[1] & 0x03) * 10);
+  uint8_t ss = (f[2] & 0x0F) + ((f[3] & 0x07) * 10);
+  uint8_t mm = (f[4] & 0x0F) + ((f[5] & 0x07) * 10);
+  uint8_t hh = (f[6] & 0x0F) + ((f[7] & 0x03) * 10);
+
+  if (hh > 23 || mm > 59 || ss > 59 || ff > 29) {
+    return;
+  }
+
+  snprintf(g_ltcText, sizeof(g_ltcText), "%02u:%02u:%02u:%02u", hh, mm, ss, ff);
+  g_ltcValid = true;
+}
+
 void onDrdyFalling() {
   uint32_t t = micros();
   if (g_samplePending) {
@@ -323,6 +404,15 @@ void setup() {
     }
   }
   attachInterrupt(drdyInterrupt, onDrdyFalling, FALLING);
+  const int ltcInterrupt = digitalPinToInterrupt(PIN_LTC);
+  if (ltcInterrupt >= 0) {
+    pinMode(PIN_LTC, INPUT);
+    g_ltcLastEdge = micros();
+    attachInterrupt(ltcInterrupt, onLtcEdge, CHANGE);
+    Serial.println(F("LTC decoder enabled on D3"));
+  } else {
+    Serial.println(F("LTC disabled: PIN_LTC has no external interrupt"));
+  }
   adsWriteCommand(CMD_START1);
   delay(10);
 
@@ -340,17 +430,19 @@ void setup() {
   Serial.println(DIFF_AIN_N);
   Serial.print(F("Serial baud="));
   Serial.println(STREAM_BAUD);
-  Serial.println(
-      F("# DATA: timestamp_us,raw,mV,acc_x,acc_y,acc_z,gyr_x,gyr_y,gyr_z | acc=mg gyr=dps"));
+  Serial.println(F("# DATA: timestamp_us,raw,mV,acc_x,acc_y,acc_z,gyr_x,gyr_y,gyr_z[,ltc]"));
+  Serial.println(F("# LTC field format: HH:MM:SS:FF (when available)"));
 }
 
 void loop() {
+  pollLtc();
+
   bool hasSample = false;
-  uint32_t tsUs = 0;
+  uint32_t drdyUs = 0;
   noInterrupts();
   if (g_samplePending) {
     hasSample = true;
-    tsUs = g_pendingTimestampUs;
+    drdyUs = g_pendingTimestampUs;
     g_samplePending = false;
   }
   interrupts();
@@ -361,8 +453,14 @@ void loop() {
 
     if (g_bno == nullptr) return;
 
-    BNO::sAxisAnalog_t sAcc = g_bno->getAxis(BNO::eAxisAcc);
+    // Timestamp as close as possible to IMU acquisition (time-sensitive path).
+    // We use the midpoint of the two IMU reads as the exported sample time.
+    const uint32_t imuReadStartUs = micros();
     BNO::sAxisAnalog_t sGyr = g_bno->getAxis(BNO::eAxisGyr);
+    const uint32_t imuReadEndUs = micros();
+    BNO::sAxisAnalog_t sAcc = g_bno->getAxis(BNO::eAxisAcc);
+    const uint32_t tsUs = imuReadStartUs + ((imuReadEndUs - imuReadStartUs) / 2);
+    (void)drdyUs;  // retained for possible future latency diagnostics
 
     ++g_streamCount;
 
@@ -375,7 +473,12 @@ void loop() {
     Serial.print((int)round(sAcc.z)); Serial.print(',');
     Serial.print(sGyr.x, 2);  Serial.print(',');
     Serial.print(sGyr.y, 2);  Serial.print(',');
-    Serial.println(sGyr.z, 2);
+    Serial.print(sGyr.z, 2);
+    if (g_ltcValid) {
+      Serial.print(',');
+      Serial.print(g_ltcText);
+    }
+    Serial.println();
   }
 
   uint32_t nowMs = millis();

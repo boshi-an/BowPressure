@@ -77,6 +77,7 @@ class ProcessedSample:
     aang_raw_x: float = 0.0
     aang_raw_y: float = 0.0
     aang_raw_z: float = 0.0
+    ltc: str = ""
 
 
 class StreamDataProcessor:
@@ -114,6 +115,12 @@ class StreamDataProcessor:
         acc_x = acc_y = acc_z = 0.0
         aang_x = aang_y = aang_z = float("nan")
         gyr_x = gyr_y = gyr_z = float("nan")
+        ltc = ""
+
+        if stream_format == "ads" and len(parts) >= 5:
+            ltc = parts[4].strip()
+        elif stream_format == "ads_imu" and len(parts) >= 11:
+            ltc = parts[10].strip()
 
         if stream_format == "ads":
             row = [
@@ -123,6 +130,7 @@ class StreamDataProcessor:
                 raw,
                 f"{mv_raw:.3f}",
                 f"{mv_smooth:.3f}",
+                ltc,
             ]
             return ProcessedSample(
                 arduino_us=arduino_us,
@@ -131,6 +139,7 @@ class StreamDataProcessor:
                 mv_raw=mv_raw,
                 mv_smooth=mv_smooth,
                 csv_row=row,
+                ltc=ltc,
             )
 
         try:
@@ -188,6 +197,7 @@ class StreamDataProcessor:
             f"{aang_x:.6f}" if not math.isnan(aang_x) else "",
             f"{aang_y:.6f}" if not math.isnan(aang_y) else "",
             f"{aang_z:.6f}" if not math.isnan(aang_z) else "",
+            ltc,
         ]
         return ProcessedSample(
             arduino_us=arduino_us,
@@ -208,6 +218,7 @@ class StreamDataProcessor:
             aang_raw_x=aang_raw_x,
             aang_raw_y=aang_raw_y,
             aang_raw_z=aang_raw_z,
+            ltc=ltc,
         )
 
 
@@ -221,6 +232,7 @@ class CsvStreamSaver:
         "raw",
         "mV_raw",
         "mV_ema",
+        "ltc_timecode",
     ]
     _HEADER_ADS_IMU = [
         "host_iso_time",
@@ -241,6 +253,7 @@ class CsvStreamSaver:
         "aang_x_ema_dps2",
         "aang_y_ema_dps2",
         "aang_z_ema_dps2",
+        "ltc_timecode",
     ]
 
     def __init__(self, path: str) -> None:
@@ -316,6 +329,8 @@ class StreamPlotter:
         self._lines_acc: list[Any] = []
         self._lines_gyr: list[Any] = []
         self._lines_aang: list[Any] = []
+        self._ltc_text_artist: Any = None
+        self._latest_ltc: str = ""
         self._plot_layout: Optional[str] = None
         self._plot_elapsed: deque[float] = deque()
         self._plot_mv: deque[float] = deque()
@@ -372,6 +387,9 @@ class StreamPlotter:
             self._lines_acc = []
             self._lines_gyr = []
             self._lines_aang = []
+            self._ltc_text_artist = axs[0].text(
+                0.01, 0.98, "LTC: --:--:--:--", transform=axs[0].transAxes, va="top"
+            )
             self._fig.tight_layout()
         else:
             self._fig, axs = plt.subplots(5, 1, sharex=True, figsize=(10, 11))
@@ -419,6 +437,9 @@ class StreamPlotter:
             axs[4].set_xlabel("Elapsed Time (s)")
             axs[4].legend(loc="upper right", fontsize=8)
             axs[4].grid(True, alpha=0.3)
+            self._ltc_text_artist = axs[0].text(
+                0.01, 0.98, "LTC: --:--:--:--", transform=axs[0].transAxes, va="top"
+            )
             self._fig.tight_layout()
         self._prev_arduino_us_for_plot = None
 
@@ -444,6 +465,8 @@ class StreamPlotter:
         self._plot_elapsed.append(elapsed_s)
         self._plot_mv.append(mv)
         self._plot_dt_us.append(dt_us)
+        if sample.ltc:
+            self._latest_ltc = sample.ltc
         min_time = max(0.0, elapsed_s - self._plot_window_s)
         while self._plot_elapsed and self._plot_elapsed[0] < min_time:
             self._plot_elapsed.popleft()
@@ -490,6 +513,9 @@ class StreamPlotter:
         ):
             self._line_mv.set_data(list(self._plot_elapsed), list(self._plot_mv))
             self._line_dt_us.set_data(list(self._plot_elapsed), list(self._plot_dt_us))
+            if self._ltc_text_artist is not None:
+                shown_ltc = self._latest_ltc if self._latest_ltc else "--:--:--:--"
+                self._ltc_text_artist.set_text(f"LTC: {shown_ltc}")
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
@@ -528,6 +554,9 @@ class StreamPlotter:
             self._lines_aang[1].set_data(t, list(self._plot_aang_y))
             self._lines_aang[2].set_data(t, list(self._plot_aang_z))
             self._line_dt_us.set_data(t, list(self._plot_dt_us))
+            if self._ltc_text_artist is not None:
+                shown_ltc = self._latest_ltc if self._latest_ltc else "--:--:--:--"
+                self._ltc_text_artist.set_text(f"LTC: {shown_ltc}")
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
@@ -600,21 +629,21 @@ def main() -> int:
                     continue
 
                 parts = line.split(",")
-                if len(parts) not in (4, 10):
+                if len(parts) not in (4, 5, 10, 11):
                     bad_lines += 1
                     continue
 
                 if stream_format is None:
-                    stream_format = "ads_imu" if len(parts) == 10 else "ads"
+                    stream_format = "ads_imu" if len(parts) in (10, 11) else "ads"
                     saver.write_header(stream_format)
                     print(f"[info] stream format: {stream_format}")
                     if plotter is not None and plotter.enabled:
                         plotter.ensure_layout(stream_format)
 
-                if len(parts) == 4 and stream_format != "ads":
+                if len(parts) in (4, 5) and stream_format != "ads":
                     bad_lines += 1
                     continue
-                if len(parts) == 10 and stream_format != "ads_imu":
+                if len(parts) in (10, 11) and stream_format != "ads_imu":
                     bad_lines += 1
                     continue
 
@@ -651,7 +680,10 @@ def main() -> int:
                     )
 
                 if sample_count % 200 == 0:
-                    print(f"logged={sample_count}")
+                    if sample.ltc:
+                        print(f"logged={sample_count}, ltc={sample.ltc}")
+                    else:
+                        print(f"logged={sample_count}")
                     saver.flush()
 
         except KeyboardInterrupt:

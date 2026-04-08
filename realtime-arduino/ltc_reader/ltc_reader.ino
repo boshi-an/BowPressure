@@ -1,4 +1,4 @@
-#define LTC_PIN 2
+#define LTC_PIN 3
 #define LTC_FPS 25
 #define SAMPLE_RATE 48000
 
