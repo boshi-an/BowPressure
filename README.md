@@ -111,4 +111,6 @@ The program will save the linear regression coefficients to `recordings/ads1263_
 
 ## LTC Input
 
-LTC input requires an additional M2903P chip for 
+LTC input requires an additional LM2903P chip for pulling the input voltage to Arduino logic.
+
+The schematics are included in `figures/Circuit/SCH_Schematic2_2026-04-30.pdf`
