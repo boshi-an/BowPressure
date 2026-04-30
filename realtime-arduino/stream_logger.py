@@ -330,7 +330,11 @@ class StreamPlotter:
         self._lines_gyr: list[Any] = []
         self._lines_aang: list[Any] = []
         self._ltc_text_artist: Any = None
+        self._rec_text_artist: Any = None
         self._latest_ltc: str = ""
+        self._latest_elapsed_s: float = 0.0
+        self._rec_text_enabled: bool = True
+        self._rec_elapsed_start_s: float = 0.0
         self._plot_layout: Optional[str] = None
         self._plot_elapsed: deque[float] = deque()
         self._plot_mv: deque[float] = deque()
@@ -390,6 +394,14 @@ class StreamPlotter:
             self._ltc_text_artist = axs[0].text(
                 0.01, 0.98, "LTC: --:--:--:--", transform=axs[0].transAxes, va="top"
             )
+            self._rec_text_artist = axs[0].text(
+                0.01,
+                0.90,
+                "REC: 0.00 s",
+                transform=axs[0].transAxes,
+                va="top",
+                color="red",
+            )
             self._fig.tight_layout()
         else:
             self._fig, axs = plt.subplots(5, 1, sharex=True, figsize=(10, 11))
@@ -440,8 +452,28 @@ class StreamPlotter:
             self._ltc_text_artist = axs[0].text(
                 0.01, 0.98, "LTC: --:--:--:--", transform=axs[0].transAxes, va="top"
             )
+            self._rec_text_artist = axs[0].text(
+                0.01,
+                0.90,
+                "REC: 0.00 s",
+                transform=axs[0].transAxes,
+                va="top",
+                color="red",
+            )
             self._fig.tight_layout()
         self._prev_arduino_us_for_plot = None
+
+    def set_recording_indicator(self, enabled: bool, *, reset: bool = False) -> None:
+        """Control recording elapsed text visibility and reset point."""
+        self._rec_text_enabled = enabled
+        if reset:
+            self._rec_elapsed_start_s = self._latest_elapsed_s
+        if self._rec_text_artist is None:
+            return
+        if not enabled:
+            self._rec_text_artist.set_text("")
+        elif reset:
+            self._rec_text_artist.set_text("REC: 0.00 s")
 
     def on_sample(
         self,
@@ -463,6 +495,7 @@ class StreamPlotter:
             dt_us = float(arduino_us - self._prev_arduino_us_for_plot)
         self._prev_arduino_us_for_plot = arduino_us
         self._plot_elapsed.append(elapsed_s)
+        self._latest_elapsed_s = elapsed_s
         self._plot_mv.append(mv)
         self._plot_dt_us.append(dt_us)
         if sample.ltc:
@@ -516,6 +549,14 @@ class StreamPlotter:
             if self._ltc_text_artist is not None:
                 shown_ltc = self._latest_ltc if self._latest_ltc else "--:--:--:--"
                 self._ltc_text_artist.set_text(f"LTC: {shown_ltc}")
+            if self._rec_text_artist is not None:
+                if self._rec_text_enabled:
+                    rec_s = max(
+                        0.0, self._latest_elapsed_s - self._rec_elapsed_start_s
+                    )
+                    self._rec_text_artist.set_text(f"REC: {rec_s:.2f} s")
+                else:
+                    self._rec_text_artist.set_text("")
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
@@ -557,6 +598,14 @@ class StreamPlotter:
             if self._ltc_text_artist is not None:
                 shown_ltc = self._latest_ltc if self._latest_ltc else "--:--:--:--"
                 self._ltc_text_artist.set_text(f"LTC: {shown_ltc}")
+            if self._rec_text_artist is not None:
+                if self._rec_text_enabled:
+                    rec_s = max(
+                        0.0, self._latest_elapsed_s - self._rec_elapsed_start_s
+                    )
+                    self._rec_text_artist.set_text(f"REC: {rec_s:.2f} s")
+                else:
+                    self._rec_text_artist.set_text("")
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)

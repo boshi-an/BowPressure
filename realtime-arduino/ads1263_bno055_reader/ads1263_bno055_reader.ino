@@ -92,6 +92,7 @@ uint32_t g_lastStatsCount = 0;
 // Decodes LTC BMC edges on PIN_LTC and stores latest HH:MM:SS:FF.
 #define LTC_FPS 30
 #define HALF_BIT_US (1000000 / (LTC_FPS * 80 * 2))
+#define NOISE_THRESHOLD (HALF_BIT_US / 10)
 #define SHORT_MIN (HALF_BIT_US / 3)
 #define SHORT_MAX (HALF_BIT_US * 3 / 2)
 #define LONG_MAX (HALF_BIT_US * 3)

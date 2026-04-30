@@ -3,4 +3,5 @@ calibrations
 *.csv
 recordings
 acceleration_compensation/__pycache__
+realtime-arduino/__pycache__
 .DS_Store
