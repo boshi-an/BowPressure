@@ -2,3 +2,5 @@ calibrations
 .vscode
 *.csv
 recordings
+acceleration_compensation/__pycache__
+.DS_Store

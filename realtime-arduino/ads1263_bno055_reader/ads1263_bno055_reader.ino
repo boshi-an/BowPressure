@@ -90,7 +90,7 @@ uint32_t g_lastStatsCount = 0;
 
 // ===== LTC decoder state =====
 // Decodes LTC BMC edges on PIN_LTC and stores latest HH:MM:SS:FF.
-#define LTC_FPS 25
+#define LTC_FPS 30
 #define HALF_BIT_US (1000000 / (LTC_FPS * 80 * 2))
 #define SHORT_MIN (HALF_BIT_US / 3)
 #define SHORT_MAX (HALF_BIT_US * 3 / 2)
@@ -298,6 +298,10 @@ void onLtcEdge() {
   uint32_t now = micros();
   uint32_t duration = now - g_ltcLastEdge;
   g_ltcLastEdge = now;
+
+  if (duration < NOISE_THRESHOLD) {
+    return;
+  }
 
   if (duration < SHORT_MIN || duration > LONG_MAX) {
     g_ltcHalfCount = 0;

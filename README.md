@@ -108,3 +108,7 @@ python acceleration_compensation/fit.py recordings/ads1263.csv
 ```
 
 The program will save the linear regression coefficients to `recordings/ads1263_coef.json`
+
+## LTC Input
+
+LTC input requires an additional M2903P chip for 

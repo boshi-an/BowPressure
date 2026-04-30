@@ -1,10 +1,11 @@
 #define LTC_PIN 3
-#define LTC_FPS 25
+#define LTC_FPS 30
 #define SAMPLE_RATE 48000
 
 // Derived timing thresholds (microseconds)
 // Half-bit period = 1000000 / (FPS * 80 * 2)
 #define HALF_BIT_US (1000000 / (LTC_FPS * 80 * 2))
+#define NOISE_THRESHOLD (HALF_BIT_US / 10)
 #define SHORT_MIN (HALF_BIT_US / 3)
 #define SHORT_MAX (HALF_BIT_US * 3 / 2)
 #define LONG_MAX (HALF_BIT_US * 3)
@@ -23,10 +24,14 @@ void isr() {
   uint32_t duration = now - last_edge;
   last_edge = now;
 
-  if (duration < SHORT_MIN || duration > LONG_MAX) {
-    half_count = 0;
+  if (duration < NOISE_THRESHOLD) {
     return;
   }
+
+    if (duration < SHORT_MIN || duration > LONG_MAX) {
+      half_count = 0;
+      return;
+    }
 
   if (duration <= SHORT_MAX) {
     half_count++;
@@ -76,9 +81,13 @@ void decode_and_print() {
 }
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(230400);
   pinMode(LTC_PIN, INPUT);
   attachInterrupt(digitalPinToInterrupt(LTC_PIN), isr, CHANGE);
+
+  while (!Serial) {
+    delay(100);
+  }
 
   Serial.println("LTC decoder ready");
   Serial.print("FPS: ");
@@ -98,6 +107,5 @@ void loop() {
   if (frame_ready) {
     decode_and_print();
   }
-
   // Your application code here — never blocked
 }
