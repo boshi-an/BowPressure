@@ -111,9 +111,9 @@ The program will save the linear regression coefficients to `recordings/ads1263_
 
 ## LTC Input
 
-LTC input requires an additional LM2903P chip for pulling the input voltage to Arduino logic.
+LTC input requires an additional LM2903P chip for pulling the input voltage to Arduino logic. The [ltc_reader](realtime-arduino/ads1263_bno055_reader/ads1263_bno055_reader.ino) includes a sample code for displaying received LTC timestamps, the [main_program](realtime-arduino/ads1263_bno055_reader/ads1263_bno055_reader.ino) supports LTC input, when LTC input is available, timestamps will automatically be included in the saved trace files.
 
-The schematics are included [in this file](figures/Circuit/SCH_Schematic2_2026-04-30.pdf).
+The schematics for LTC reading circuit are included [in this file](figures/Circuit/SCH_Schematic2_2026-04-30.pdf). The circuit is capable of detecting very small signals (less than 100mVpp) to large signals (up to 3.3Vpp). The signal is not required to be centered at 0V.
 
 You may generate LTC signals by playing LTC audio generated [on this website](https://elteesee.pehrhovey.net) and wire it to the LTC input circuit through the 3.5mm Audio Jack.
 
