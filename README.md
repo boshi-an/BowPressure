@@ -113,4 +113,6 @@ The program will save the linear regression coefficients to `recordings/ads1263_
 
 LTC input requires an additional LM2903P chip for pulling the input voltage to Arduino logic.
 
-The schematics are included in `figures/Circuit/SCH_Schematic2_2026-04-30.pdf`
+The schematics are included in `figures/Circuit/SCH_Schematic2_2026-04-30.pdf`.
+
+You may generate LTC signals by playing LTC audio generated [in this file](https://elteesee.pehrhovey.net) and wire it to the LTC input circuit through the 3.5mm Audio Jack.
