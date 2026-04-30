@@ -116,3 +116,5 @@ LTC input requires an additional LM2903P chip for pulling the input voltage to A
 The schematics are included [in this file](figures/Circuit/SCH_Schematic2_2026-04-30.pdf).
 
 You may generate LTC signals by playing LTC audio generated [on this website](https://elteesee.pehrhovey.net) and wire it to the LTC input circuit through the 3.5mm Audio Jack.
+
+The compatibility with [Cubase LTC](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/synchronization/synchronization_timecode_standards_c.html) still requires confirmation, but in theory it should work.
