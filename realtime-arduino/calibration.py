@@ -10,9 +10,10 @@
 import json
 import serial
 import sys
-import time
 from datetime import datetime
 from typing import Dict, Any
+
+from streamer import SerialLineGenerator, parse_data_line, parse_data_parts
 
 MAX_FORCE = 2.0
 NUM_SAMPLES_PER_POSITION = 20
@@ -100,50 +101,36 @@ class BowReader:
     """Reads mV from realtime-arduino ads1263_bno055_reader serial DATA lines."""
 
     def __init__(self, port: str = "/dev/ttyACM0", baudrate: int = 230400, timeout: float = 1.0):
-        self._ser = serial.Serial(
-            port=port,
-            baudrate=baudrate,
-            timeout=timeout,
-            bytesize=serial.EIGHTBITS,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-        )
+        del timeout  # unused: SerialLineGenerator uses fixed timeout internally
+        self._reader_cm = SerialLineGenerator(port=port, baud=baudrate)
+        self._reader = self._reader_cm.__enter__()
+        self._lines_iter = self._reader.lines()
         self._sample_count = 0
         self._error_count = 0
-        time.sleep(0.2)
-        self._ser.reset_input_buffer()
 
     def read_fresh(self) -> Dict[str, Any]:
         """Flush stale data, then return the next mV reading from a valid DATA line."""
-        # Match ForceReader semantics: drop any buffered/stale serial lines and
-        # wait for the next line produced after this call.
-        self._ser.reset_input_buffer()
+        self._reader.reset_input_buffer()
         values = []
         last_line = ""
         while True:
-            raw_line = self._ser.readline()
-            if not raw_line:
-                self._error_count += 1
-                continue
-
-            line = raw_line.decode("utf-8", errors="replace").strip()
+            line = next(self._lines_iter)
             if not line:
                 continue
             if line.startswith("#") or line.startswith("STATS,"):
                 continue
-            if not line.startswith("DATA,"):
+            parsed = parse_data_line(line)
+            if parsed is None:
                 continue
-
-            parts = line.split(",")
-            if len(parts) not in (10, 11):
+            stream_format, parts = parsed
+            if stream_format != "ads_imu":
                 self._error_count += 1
                 continue
-
-            try:
-                value = float(parts[3])  # mV
-            except ValueError:
+            sample = parse_data_parts(parts, stream_format)
+            if sample is None:
                 self._error_count += 1
                 continue
+            value = sample.mv_raw
             if abs(value) > 200:
                 self._error_count += 1
                 continue
@@ -164,7 +151,7 @@ class BowReader:
             }
 
     def close(self):
-        self._ser.close()
+        self._reader_cm.__exit__(None, None, None)
 
 
 force_reader = ForceReader("/dev/ttyUSB0", 9600)

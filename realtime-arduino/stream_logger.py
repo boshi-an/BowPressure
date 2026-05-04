@@ -11,9 +11,9 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Any, Iterator, Optional
+from typing import Any, Optional
 
-import serial
+from streamer import ArduinoDataSample, SerialLineGenerator, parse_data_line, parse_data_parts
 
 
 def parse_args() -> argparse.Namespace:
@@ -82,7 +82,7 @@ class ProcessedSample:
 
 class StreamDataProcessor:
     """
-    Parse DATA comma fields into numeric values and CSV rows.
+    Parse ArduinoDataSample into derived values and CSV rows.
     Angular acceleration for plotting is d(gyro)/dt (deg/s²). Pass-through otherwise.
     """
 
@@ -94,13 +94,11 @@ class StreamDataProcessor:
         self._mv_alpha = max(0.0, min(1.0, float(mv_ema_alpha)))
         self._mv_ema: Optional[float] = None
 
-    def process(self, parts: list[str], stream_format: str) -> Optional[ProcessedSample]:
-        try:
-            arduino_us = int(parts[1])
-            raw = int(parts[2])
-            mv_raw = float(parts[3])
-        except (ValueError, IndexError):
-            return None
+    def process(self, sample: ArduinoDataSample) -> Optional[ProcessedSample]:
+        arduino_us = sample.arduino_us
+        raw = sample.raw
+        mv_raw = sample.mv_raw
+        stream_format = sample.stream_format
 
         now_epoch = time.time()
         now_iso = dt.datetime.now().isoformat(timespec="milliseconds")
@@ -115,12 +113,7 @@ class StreamDataProcessor:
         acc_x = acc_y = acc_z = 0.0
         aang_x = aang_y = aang_z = float("nan")
         gyr_x = gyr_y = gyr_z = float("nan")
-        ltc = ""
-
-        if stream_format == "ads" and len(parts) >= 5:
-            ltc = parts[4].strip()
-        elif stream_format == "ads_imu" and len(parts) >= 11:
-            ltc = parts[10].strip()
+        ltc = sample.ltc
 
         if stream_format == "ads":
             row = [
@@ -142,15 +135,12 @@ class StreamDataProcessor:
                 ltc=ltc,
             )
 
-        try:
-            acc_x = float(parts[4])
-            acc_y = float(parts[5])
-            acc_z = float(parts[6])
-            gyr_x = float(parts[7])
-            gyr_y = float(parts[8])
-            gyr_z = float(parts[9])
-        except (ValueError, IndexError):
-            return None
+        acc_x = sample.acc_x
+        acc_y = sample.acc_y
+        acc_z = sample.acc_z
+        gyr_x = sample.gyr_x
+        gyr_y = sample.gyr_y
+        gyr_z = sample.gyr_z
 
         aang_raw_x = aang_raw_y = aang_raw_z = float("nan")
         if (
@@ -287,35 +277,6 @@ class CsvStreamSaver:
             self._file.flush()
 
 
-class SerialLineGenerator:
-    """Blocking generator over decoded, stripped lines from a serial port."""
-
-    def __init__(self, port: str, baud: int, *, post_open_delay_s: float = 0.2) -> None:
-        self._port = port
-        self._baud = baud
-        self._post_open_delay_s = post_open_delay_s
-        self._ser: Optional[serial.Serial] = None
-
-    def __enter__(self) -> SerialLineGenerator:
-        self._ser = serial.Serial(self._port, self._baud, timeout=1.0)
-        time.sleep(self._post_open_delay_s)
-        self._ser.reset_input_buffer()
-        return self
-
-    def __exit__(self, *exc: Any) -> None:
-        if self._ser is not None:
-            self._ser.close()
-            self._ser = None
-
-    def lines(self) -> Iterator[str]:
-        assert self._ser is not None
-        while True:
-            raw = self._ser.readline()
-            if not raw:
-                continue
-            yield raw.decode("utf-8", errors="replace").strip()
-
-
 class StreamPlotter:
     """Optional matplotlib real-time plots for mV (and IMU-derived traces)."""
 
@@ -325,6 +286,7 @@ class StreamPlotter:
         self._fig: Any = None
         self._axes: Any = None
         self._line_mv: Any = None
+        self._line_mv_comp: Any = None
         self._line_dt_us: Any = None
         self._lines_acc: list[Any] = []
         self._lines_gyr: list[Any] = []
@@ -338,6 +300,7 @@ class StreamPlotter:
         self._plot_layout: Optional[str] = None
         self._plot_elapsed: deque[float] = deque()
         self._plot_mv: deque[float] = deque()
+        self._plot_mv_comp: deque[float] = deque()
         self._plot_dt_us: deque[float] = deque()
         self._plot_acc_x: deque[float] = deque()
         self._plot_acc_y: deque[float] = deque()
@@ -375,19 +338,25 @@ class StreamPlotter:
         self._plot_layout = layout
         plt.ion()
         if layout == "ads":
-            self._fig, axs = plt.subplots(2, 1, sharex=True, figsize=(10, 6))
+            self._fig, axs = plt.subplots(3, 1, sharex=True, figsize=(10, 7))
             self._axes = axs
             (self._line_mv,) = axs[0].plot([], [], linewidth=1.0, color="tab:blue")
             axs[0].set_ylabel("mV")
             axs[0].set_title("ADS1263 (real-time)")
             axs[0].grid(True, alpha=0.3)
-            (self._line_dt_us,) = axs[1].plot(
-                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
+            (self._line_mv_comp,) = axs[1].plot(
+                [], [], linewidth=1.0, color="tab:green", label="mV (compensated)"
             )
-            axs[1].set_xlabel("Elapsed Time (s)")
-            axs[1].set_ylabel("delta us")
+            axs[1].set_ylabel("mV comp")
             axs[1].legend(loc="upper right", fontsize=8)
             axs[1].grid(True, alpha=0.3)
+            (self._line_dt_us,) = axs[2].plot(
+                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
+            )
+            axs[2].set_xlabel("Elapsed Time (s)")
+            axs[2].set_ylabel("delta us")
+            axs[2].legend(loc="upper right", fontsize=8)
+            axs[2].grid(True, alpha=0.3)
             self._lines_acc = []
             self._lines_gyr = []
             self._lines_aang = []
@@ -404,25 +373,31 @@ class StreamPlotter:
             )
             self._fig.tight_layout()
         else:
-            self._fig, axs = plt.subplots(5, 1, sharex=True, figsize=(10, 11))
+            self._fig, axs = plt.subplots(6, 1, sharex=True, figsize=(10, 12))
             self._axes = axs
             (self._line_mv,) = axs[0].plot([], [], linewidth=1.0, color="tab:blue")
             axs[0].set_ylabel("mV")
             axs[0].set_title("ADS1263 + BNO055 (real-time)")
             axs[0].grid(True, alpha=0.3)
+            (self._line_mv_comp,) = axs[1].plot(
+                [], [], linewidth=1.0, color="tab:green", label="mV (compensated)"
+            )
+            axs[1].set_ylabel("mV comp")
+            axs[1].legend(loc="upper right", fontsize=8)
+            axs[1].grid(True, alpha=0.3)
             colors = ("tab:red", "tab:green", "tab:purple")
             self._lines_acc = []
             for i, lab in enumerate(("acc_x", "acc_y", "acc_z")):
-                (ln,) = axs[1].plot(
+                (ln,) = axs[2].plot(
                     [], [], linewidth=1.0, color=colors[i], label=f"{lab} (mg)"
                 )
                 self._lines_acc.append(ln)
-            axs[1].set_ylabel("Acceleration (mg)")
-            axs[1].legend(loc="upper right", fontsize=8)
-            axs[1].grid(True, alpha=0.3)
+            axs[2].set_ylabel("Acceleration (mg)")
+            axs[2].legend(loc="upper right", fontsize=8)
+            axs[2].grid(True, alpha=0.3)
             self._lines_aang = []
             for i, lab in enumerate(("dω_x/dt", "dω_y/dt", "dω_z/dt")):
-                (ln,) = axs[2].plot(
+                (ln,) = axs[3].plot(
                     [],
                     [],
                     linewidth=1.0,
@@ -430,25 +405,25 @@ class StreamPlotter:
                     label=f"{lab} (deg/s²)",
                 )
                 self._lines_aang.append(ln)
-            axs[2].set_ylabel("Angular accel. (deg/s²)")
-            axs[2].legend(loc="upper right", fontsize=8)
-            axs[2].grid(True, alpha=0.3)
+            axs[3].set_ylabel("Angular accel. (deg/s²)")
+            axs[3].legend(loc="upper right", fontsize=8)
+            axs[3].grid(True, alpha=0.3)
             self._lines_gyr = []
             for i, lab in enumerate(("gyr_x", "gyr_y", "gyr_z")):
-                (ln,) = axs[3].plot(
+                (ln,) = axs[4].plot(
                     [], [], linewidth=1.0, color=colors[i], label=f"{lab} (dps)"
                 )
                 self._lines_gyr.append(ln)
-            axs[3].set_ylabel("Angular velocity (dps)")
-            axs[3].legend(loc="upper right", fontsize=8)
-            axs[3].grid(True, alpha=0.3)
-            (self._line_dt_us,) = axs[4].plot(
-                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
-            )
-            axs[4].set_ylabel("delta us")
-            axs[4].set_xlabel("Elapsed Time (s)")
+            axs[4].set_ylabel("Angular velocity (dps)")
             axs[4].legend(loc="upper right", fontsize=8)
             axs[4].grid(True, alpha=0.3)
+            (self._line_dt_us,) = axs[5].plot(
+                [], [], linewidth=1.0, color="tab:orange", label="delta arduino_us"
+            )
+            axs[5].set_ylabel("delta us")
+            axs[5].set_xlabel("Elapsed Time (s)")
+            axs[5].legend(loc="upper right", fontsize=8)
+            axs[5].grid(True, alpha=0.3)
             self._ltc_text_artist = axs[0].text(
                 0.01, 0.98, "LTC: --:--:--:--", transform=axs[0].transAxes, va="top"
             )
@@ -481,6 +456,7 @@ class StreamPlotter:
         stream_format: str,
         first_arduino_us: Optional[int],
         sample: ProcessedSample,
+        compensated_mv: Optional[float] = None,
     ) -> None:
         if not self.enabled or first_arduino_us is None:
             return
@@ -497,6 +473,11 @@ class StreamPlotter:
         self._plot_elapsed.append(elapsed_s)
         self._latest_elapsed_s = elapsed_s
         self._plot_mv.append(mv)
+        self._plot_mv_comp.append(
+            compensated_mv
+            if compensated_mv is not None and math.isfinite(compensated_mv)
+            else float("nan")
+        )
         self._plot_dt_us.append(dt_us)
         if sample.ltc:
             self._latest_ltc = sample.ltc
@@ -504,6 +485,7 @@ class StreamPlotter:
         while self._plot_elapsed and self._plot_elapsed[0] < min_time:
             self._plot_elapsed.popleft()
             self._plot_mv.popleft()
+            self._plot_mv_comp.popleft()
             self._plot_dt_us.popleft()
             if stream_format == "ads_imu":
                 self._plot_acc_x.popleft()
@@ -541,10 +523,12 @@ class StreamPlotter:
         if (
             stream_format == "ads"
             and self._line_mv is not None
+            and self._line_mv_comp is not None
             and self._line_dt_us is not None
             and self._axes is not None
         ):
             self._line_mv.set_data(list(self._plot_elapsed), list(self._plot_mv))
+            self._line_mv_comp.set_data(list(self._plot_elapsed), list(self._plot_mv_comp))
             self._line_dt_us.set_data(list(self._plot_elapsed), list(self._plot_dt_us))
             if self._ltc_text_artist is not None:
                 shown_ltc = self._latest_ltc if self._latest_ltc else "--:--:--:--"
@@ -560,8 +544,12 @@ class StreamPlotter:
             if self._plot_elapsed:
                 axs = self._axes
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
-                for axi, series in ((axs[0], [self._plot_mv]), (axs[1], [self._plot_dt_us])):
-                    flat = [x for dq in series for x in dq]
+                for axi, series in (
+                    (axs[0], [self._plot_mv]),
+                    (axs[1], [self._plot_mv_comp]),
+                    (axs[2], [self._plot_dt_us]),
+                ):
+                    flat = [x for dq in series for x in dq if math.isfinite(x)]
                     if not flat:
                         continue
                     y_min = min(flat)
@@ -578,6 +566,7 @@ class StreamPlotter:
             and self._fig is not None
             and self._axes is not None
             and self._line_mv is not None
+            and self._line_mv_comp is not None
             and self._line_dt_us is not None
             and len(self._lines_acc) == 3
             and len(self._lines_aang) == 3
@@ -585,6 +574,7 @@ class StreamPlotter:
         ):
             t = list(self._plot_elapsed)
             self._line_mv.set_data(t, list(self._plot_mv))
+            self._line_mv_comp.set_data(t, list(self._plot_mv_comp))
             self._lines_acc[0].set_data(t, list(self._plot_acc_x))
             self._lines_acc[1].set_data(t, list(self._plot_acc_y))
             self._lines_acc[2].set_data(t, list(self._plot_acc_z))
@@ -611,12 +601,13 @@ class StreamPlotter:
                 axs[0].set_xlim(self._plot_elapsed[0], self._plot_elapsed[-1] + 1e-9)
                 for axi, series in (
                     (axs[0], [self._plot_mv]),
-                    (axs[1], [self._plot_acc_x, self._plot_acc_y, self._plot_acc_z]),
-                    (axs[2], [self._plot_aang_x, self._plot_aang_y, self._plot_aang_z]),
-                    (axs[3], [self._plot_gyr_x, self._plot_gyr_y, self._plot_gyr_z]),
-                    (axs[4], [self._plot_dt_us]),
+                    (axs[1], [self._plot_mv_comp]),
+                    (axs[2], [self._plot_acc_x, self._plot_acc_y, self._plot_acc_z]),
+                    (axs[3], [self._plot_aang_x, self._plot_aang_y, self._plot_aang_z]),
+                    (axs[4], [self._plot_gyr_x, self._plot_gyr_y, self._plot_gyr_z]),
+                    (axs[5], [self._plot_dt_us]),
                 ):
-                    flat = [x for dq in series for x in dq]
+                    flat = [x for dq in series for x in dq if math.isfinite(x)]
                     if not flat:
                         continue
                     y_min = min(flat)
@@ -633,6 +624,23 @@ class StreamPlotter:
         if self._plt is not None and self.enabled:
             self._plt.ioff()
             self._plt.show()
+
+    def close(self) -> None:
+        """Close plot window and reset internal figure state."""
+        if self._plt is None:
+            return
+        if self._fig is not None:
+            self._plt.close(self._fig)
+        self._fig = None
+        self._axes = None
+        self._line_mv = None
+        self._line_mv_comp = None
+        self._line_dt_us = None
+        self._lines_acc = []
+        self._lines_gyr = []
+        self._lines_aang = []
+        self._ltc_text_artist = None
+        self._rec_text_artist = None
 
 
 def main() -> int:
@@ -673,31 +681,29 @@ def main() -> int:
                     print(line)
                     continue
 
-                if not line.startswith("DATA,"):
+                parsed_line = parse_data_line(line)
+                if parsed_line is None:
                     print(f"[info] {line}")
                     continue
+                line_stream_format, parts = parsed_line
 
-                parts = line.split(",")
-                if len(parts) not in (4, 5, 10, 11):
+                decoded = parse_data_parts(parts, line_stream_format)
+                if decoded is None:
                     bad_lines += 1
                     continue
 
                 if stream_format is None:
-                    stream_format = "ads_imu" if len(parts) in (10, 11) else "ads"
+                    stream_format = line_stream_format
                     saver.write_header(stream_format)
                     print(f"[info] stream format: {stream_format}")
                     if plotter is not None and plotter.enabled:
                         plotter.ensure_layout(stream_format)
 
-                if len(parts) in (4, 5) and stream_format != "ads":
-                    bad_lines += 1
-                    continue
-                if len(parts) in (10, 11) and stream_format != "ads_imu":
+                if line_stream_format != stream_format:
                     bad_lines += 1
                     continue
 
-                assert stream_format is not None
-                sample = processor.process(parts, stream_format)
+                sample = processor.process(decoded)
                 if sample is None:
                     bad_lines += 1
                     continue

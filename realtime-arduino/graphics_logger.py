@@ -13,6 +13,7 @@ import json
 import os
 import queue
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -22,12 +23,17 @@ from typing import Any, Optional
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from acceleration_compensation.inference import RealtimeCompensator, load_model
 from stream_logger import (
     ProcessedSample,
-    SerialLineGenerator,
     StreamDataProcessor,
     StreamPlotter,
 )
+from streamer import SerialLineGenerator, parse_data_line, parse_data_parts
 
 
 @dataclass
@@ -98,6 +104,7 @@ class GraphicsLoggerApp:
         self.output_var = tk.StringVar(
             value=str(Path.cwd() / "ads1263_stream.csv")
         )
+        self.model_var = tk.StringVar(value="")
         self.status_var = tk.StringVar(value="Idle")
         self.connection_var = tk.StringVar(value="Disconnected")
         self.recording_var = tk.StringVar(value="Not recording")
@@ -117,6 +124,7 @@ class GraphicsLoggerApp:
         self._port_display_to_address: dict[str, str] = {}
         self._close_requested = False
         self._queue_after_id: Optional[str] = None
+        self._arduino_cli_missing_warned = False
 
         self._build_ui()
         self._refresh_ports()
@@ -152,18 +160,27 @@ class GraphicsLoggerApp:
         ttk.Button(frame, text="Browse...", command=self._select_output_path).grid(
             row=2, column=2, padx=(8, 0), pady=4
         )
+        ttk.Label(frame, text="Compensation Model").grid(
+            row=3, column=0, sticky="w", pady=4
+        )
+        ttk.Entry(frame, textvariable=self.model_var).grid(
+            row=3, column=1, sticky="ew", pady=4
+        )
+        ttk.Button(frame, text="Browse...", command=self._select_model_path).grid(
+            row=3, column=2, padx=(8, 0), pady=4
+        )
 
         self.connect_button = ttk.Button(
             frame, text="Connect", command=self._toggle_connection
         )
-        self.connect_button.grid(row=3, column=0, columnspan=3, sticky="ew", pady=(10, 4))
+        self.connect_button.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(10, 4))
         self.record_button = ttk.Button(
             frame, text="Start recording", command=self._toggle_recording, state="disabled"
         )
-        self.record_button.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(4, 10))
+        self.record_button.grid(row=5, column=0, columnspan=3, sticky="ew", pady=(4, 10))
 
         stats = ttk.LabelFrame(frame, text="Session")
-        stats.grid(row=5, column=0, columnspan=3, sticky="ew")
+        stats.grid(row=6, column=0, columnspan=3, sticky="ew")
         stats.columnconfigure(1, weight=1)
 
         ttk.Label(stats, text="Status").grid(row=0, column=0, sticky="w", padx=8, pady=4)
@@ -213,6 +230,14 @@ class GraphicsLoggerApp:
             return
         self._connect()
 
+    def _select_model_path(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Select fitted model JSON",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if selected:
+            self.model_var.set(selected)
+
     def _list_arduino_ports(self) -> list[tuple[str, str]]:
         try:
             proc = subprocess.run(
@@ -223,7 +248,15 @@ class GraphicsLoggerApp:
                 timeout=5.0,
             )
             parsed = json.loads(proc.stdout)
-        except (FileNotFoundError, subprocess.SubprocessError, json.JSONDecodeError):
+        except FileNotFoundError:
+            if not self._arduino_cli_missing_warned:
+                print(
+                    "Warning: 'arduino-cli' command not found; auto port detection disabled.",
+                    file=sys.stderr,
+                )
+                self._arduino_cli_missing_warned = True
+            return []
+        except (subprocess.SubprocessError, json.JSONDecodeError):
             return []
 
         ports: list[tuple[str, str]] = []
@@ -299,13 +332,19 @@ class GraphicsLoggerApp:
         if not self._connected:
             return
         self.status_var.set("Disconnecting...")
+        self._connected = False
+        self.connection_var.set("Disconnected")
+        if self._plotter is not None:
+            self._plotter.close()
+            self._plotter = None
         if self._recording:
             self._recording = False
             self.recording_var.set("Not recording")
             self.record_button.configure(text="Start recording")
         self._stop_event.set()
-        self.connect_button.configure(state="disabled")
-        self.record_button.configure(state="disabled")
+        self.status_var.set("Disconnected")
+        self.connect_button.configure(text="Connect", state="normal")
+        self.record_button.configure(text="Start recording", state="disabled")
 
     def _toggle_recording(self) -> None:
         if not self._connected:
@@ -352,47 +391,67 @@ class GraphicsLoggerApp:
         self._queue.put(("stats", stats))
         stream_format: Optional[str] = None
         processor = StreamDataProcessor()
+        compensator: Optional[RealtimeCompensator] = None
+        model_path_raw = self.model_var.get().strip()
+        if model_path_raw:
+            try:
+                loaded_model = load_model(Path(model_path_raw))
+                compensator = RealtimeCompensator(
+                    loaded=loaded_model,
+                    mv_ema_alpha=0.20,
+                    aang_ema_alpha=0.20,
+                )
+                self._queue.put(
+                    ("stats", LoggerStats(status=f"Running (compensation: {loaded_model.model_type})"))
+                )
+            except Exception as exc:  # pylint: disable=broad-except
+                self._queue.put(("error", f"Failed to load compensation model: {exc}"))
+                self._queue.put(("connected", False))
+                self._queue.put(("stopped", None))
+                return
         last_flush_at = time.time()
         saver: Optional[LiveCsvRecorder] = None
         connected_notified = False
 
         try:
             with SerialLineGenerator(port, baud) as reader:
-                for line in reader.lines():
-                    if self._stop_event.is_set():
-                        break
-
+                for line in reader.lines(stop_event=self._stop_event):
                     if line.startswith("STATS,"):
                         continue
-                    if not line.startswith("DATA,"):
+                    parsed_line = parse_data_line(line)
+                    if parsed_line is None:
                         continue
-
-                    parts = line.split(",")
-                    if len(parts) not in (4, 5, 10, 11):
+                    line_stream_format, parts = parsed_line
+                    decoded = parse_data_parts(parts, line_stream_format)
+                    if decoded is None:
                         stats.bad_lines += 1
                         self._queue.put(("stats", LoggerStats(**vars(stats))))
                         continue
 
                     if stream_format is None:
-                        stream_format = "ads_imu" if len(parts) in (10, 11) else "ads"
+                        stream_format = line_stream_format
                         self._queue.put(("plot_format", stream_format))
 
-                    if len(parts) in (4, 5) and stream_format != "ads":
-                        stats.bad_lines += 1
-                        self._queue.put(("stats", LoggerStats(**vars(stats))))
-                        continue
-                    if len(parts) in (10, 11) and stream_format != "ads_imu":
+                    if line_stream_format != stream_format:
                         stats.bad_lines += 1
                         self._queue.put(("stats", LoggerStats(**vars(stats))))
                         continue
 
-                    sample = processor.process(parts, stream_format)
+                    sample = processor.process(decoded)
                     if sample is None:
                         stats.bad_lines += 1
                         self._queue.put(("stats", LoggerStats(**vars(stats))))
                         continue
 
-                    self._queue.put(("sample", (stream_format, sample)))
+                    compensated_mv: Optional[float] = None
+                    if compensator is not None:
+                        observed = compensator.observe(decoded)
+                        if observed is not None:
+                            center, pred_mv = observed
+                            if center.arduino_us == sample.arduino_us:
+                                compensated_mv = sample.mv - pred_mv
+
+                    self._queue.put(("sample", (stream_format, sample, compensated_mv)))
                     if not connected_notified:
                         self._queue.put(("connected", True))
                         connected_notified = True
@@ -449,9 +508,13 @@ class GraphicsLoggerApp:
             elif event == "error":
                 assert isinstance(payload, str)
                 self.status_var.set("Error")
+                print(f"[error] {payload}")
                 messagebox.showerror("Logging failed", payload)
             elif event == "connected":
                 assert isinstance(payload, bool)
+                if payload and self._stop_event.is_set():
+                    # Ignore stale "connected" events that race with disconnect.
+                    continue
                 self._connected = payload
                 self.connection_var.set("Connected" if payload else "Disconnected")
                 if payload:
@@ -459,18 +522,19 @@ class GraphicsLoggerApp:
                     self.connect_button.configure(text="Disconnect", state="normal")
                     self.record_button.configure(state="normal")
                 else:
+                    if self._plotter is not None:
+                        self._plotter.close()
+                        self._plotter = None
                     self.status_var.set("Disconnected")
                     self.recording_var.set("Not recording")
                     self.connect_button.configure(text="Connect", state="normal")
                     self.record_button.configure(text="Start recording", state="disabled")
-                    if self._plotter is not None:
-                        self._plotter.set_recording_indicator(False)
             elif event == "plot_format":
                 assert isinstance(payload, str)
                 if self._plotter is not None and self._plotter.enabled:
                     self._plotter.ensure_layout(payload)
             elif event == "sample":
-                stream_format, sample = payload
+                stream_format, sample, compensated_mv = payload
                 assert isinstance(stream_format, str)
                 assert isinstance(sample, ProcessedSample)
                 if self._first_arduino_us is None:
@@ -480,6 +544,7 @@ class GraphicsLoggerApp:
                         stream_format=stream_format,
                         first_arduino_us=self._first_arduino_us,
                         sample=sample,
+                        compensated_mv=compensated_mv,
                     )
             elif event == "stopped":
                 self._recording = False
