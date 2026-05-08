@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import os
+import platform
 import time
 from dataclasses import dataclass
 from typing import Any, Iterator, Optional
@@ -100,14 +102,27 @@ def parse_data_parts(parts: list[str], stream_format: str) -> Optional[ArduinoDa
 class SerialLineGenerator:
     """Blocking generator over decoded, stripped lines from a serial port."""
 
-    def __init__(self, port: str, baud: int, *, post_open_delay_s: float = 0.2) -> None:
+    def __init__(self, port: str, baud: int, *, post_open_delay_s: float = 0.05, timeout_s: float = 0.1) -> None:
         self._port = port
         self._baud = baud
         self._post_open_delay_s = post_open_delay_s
+        self._timeout_s = timeout_s
         self._ser: Optional[serial.Serial] = None
 
     def __enter__(self) -> "SerialLineGenerator":
-        self._ser = serial.Serial(self._port, self._baud, timeout=1.0)
+        self._ser = serial.Serial(
+            self._port,
+            self._baud,
+            timeout=self._timeout_s,
+            write_timeout=self._timeout_s,
+        )
+        # Optimize USB serial latency on Linux
+        if platform.system() == "Linux" and hasattr(self._ser, 'port'):
+            try:
+                # Set USB latency timer to 1ms (from default 16ms) for FTDI/USB adapters
+                os.system(f"echo 1 | sudo tee /sys/bus/usb-serial/devices/{os.path.basename(self._port)}/latency_timer > /dev/null 2>&1")
+            except Exception:
+                pass  # Silently fail if permission denied or not USB
         time.sleep(self._post_open_delay_s)
         self.reset_input_buffer()
         return self
