@@ -1,5 +1,7 @@
 # Force-sensing Violin/Cello Bow Setup
 
+This repo provides a systemetical way to capture human violin playing data.
+
 ## Preparation (From Scratch)
 
 - Arduino Uno (R3 or R4)
@@ -128,3 +130,19 @@ The schematics for LTC reading circuit are included [in this file](figures/Circu
 You may generate LTC signals by playing LTC audio generated [on this website](https://elteesee.pehrhovey.net) and wire it to the LTC input circuit through the 3.5mm Audio Jack.
 
 The compatibility with [Cubase LTC](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/synchronization/synchronization_timecode_standards_c.html) still requires confirmation, but in theory it should work.
+
+# Data Collection with Mocap
+
+The sensorized bow can be used together with april tag clamps on the bow and the violin to do violin playing motion data captuer.
+
+The 3D model files for the clamps are at [OnShape](https://cad.onshape.com/documents/7d9b660bd9e12f1896edefd1/w/8b9ee4686a368937af61d3e0/e/939a0500c785a22a848d996b). These models are also licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
+
+The apriltags models are at [here](figures/Apriltags).
+
+The Mocap data processing pipeline is not yet opensourced.
+
+## License
+
+This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
+Free for research and personal use. Commercial use is prohibited.  
+Derivatives must use the same license.
