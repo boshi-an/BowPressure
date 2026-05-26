@@ -180,9 +180,38 @@
       gap: .3rem 1.8rem;
     }
 
+    /* Sign-up banner */
+    .signup-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.2rem;
+      background: #f0fdf4;
+      border-top: 3px solid #16a34a;
+      padding: 1.1rem 2.5rem;
+      flex-wrap: wrap;
+    }
+    .signup-banner .sb-text { font-size: .92rem; color: #14532d; }
+    .signup-banner .sb-text strong { font-size: 1rem; display: block; margin-bottom: .15rem; color: #14532d; }
+    .signup-btn {
+      display: inline-block;
+      background: #16a34a;
+      color: #fff;
+      font-weight: 700;
+      font-size: .9rem;
+      padding: .65rem 1.5rem;
+      border-radius: 6px;
+      text-decoration: none;
+      white-space: nowrap;
+      flex-shrink: 0;
+      transition: background .15s;
+    }
+    .signup-btn:hover { background: #15803d; text-decoration: none; }
+
     @media print {
       body { background: #fff; }
       .page { margin: 0; border-radius: 0; box-shadow: none; }
+      .signup-banner { display: none; }
     }
   </style>
 </head>
@@ -201,6 +230,14 @@
       <span class="chip">CHF 25 compensation</span>
     </div>
   </header>
+
+  <div class="signup-banner">
+    <div class="sb-text">
+      <strong>Interested in participating?</strong>
+      Fill out the sign-up form — it takes about 5 minutes. We will contact you to schedule your session.
+    </div>
+    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up →</a>
+  </div>
 
   <div class="body">
 
@@ -354,6 +391,14 @@
     </div>
 
   </div><!-- /.body -->
+
+  <div class="signup-banner">
+    <div class="sb-text">
+      <strong>Ready to sign up?</strong>
+      Fill out the form — it takes about 5 minutes. We will contact you to schedule your session.
+    </div>
+    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up →</a>
+  </div>
 
   <footer>
     <span>ETH Zurich · Soft Robotics Lab · ETHZ_Ethics_Application_V2025</span>
