@@ -208,6 +208,13 @@
     }
     .signup-btn:hover { background: #15803d; text-decoration: none; }
 
+    /* Figure caption and footnotes */
+    figure { text-align: center; margin-bottom: 1rem; }
+    .figcaption { display: block; font-size: .85rem; color: var(--muted); margin: .45rem 0 .9rem; text-align: center; }
+    .footnotes { font-size: .78rem; color: var(--muted); margin-top: .8rem; border-top: 1px solid var(--border); padding-top: .6rem; }
+    .footnotes li { margin-bottom: .2rem; }
+    .footnotes a { color: var(--blue); }
+
     @media print {
       body { background: #fff; }
       .page { margin: 0; border-radius: 0; box-shadow: none; }
@@ -221,7 +228,7 @@
   <header>
     <div class="label">ETH Zurich · Soft Robotics Lab · Master's Thesis</div>
     <h1>Force-sensitive Violin Playing Dataset</h1>
-    <div class="subtitle">Participant Information Sheet</div>
+    <div class="subtitle">Participant Information (June 15–July 15, 2026)</div>
     <div class="chips">
       <span class="chip">One session only</span>
       <span class="chip">60–90 min total</span>
@@ -236,18 +243,38 @@
       <strong>Interested in participating?</strong>
       Fill out the sign-up form — it takes about 5 minutes. We will contact you to schedule your session.
     </div>
-    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up →</a>
+    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up (June 15–July 15, 2026)</a>
   </div>
 
   <div class="body">
 
     <!-- 1 -->
     <h2>1 · Study at a Glance</h2>
+
+    <p>
+      This study investigates how skilled violinists coordinate body and bow movement,
+      bow–string contact force,
+      and sound production.
+      The goal is to build a research dataset of synchronised
+      motion, force, and audio recordings from advanced violin performance.
+      The collected data will later inform the design and control of a robotic violinist.
+    </p>
+
+    <p>
+      Skilled musicians are invited to attend the lab to play the violin while being recorded with a capturing system.
+    </p>
+
+    <figure>
+      <img src="https://metaverse-ai-lab-thu.github.io/String-Performance-Dataset-SPD/static/images/violin_ablation.gif" alt="GIF showing the captured violin playing motion" style="width:100%; border-radius: 8px; margin: .6rem 0;">
+      <figcaption class="figcaption">a sample result from a similar study<sup><a href="#fn1" id="ref1">1</a></sup></figcaption>
+    </figure>
+
     <div class="glance">
       <div class="glance-item"><div class="g-label">Session duration</div><div class="g-value">60–90 minutes</div></div>
       <div class="glance-item"><div class="g-label">Recording time</div><div class="g-value">Up to 15 min</div></div>
       <div class="glance-item"><div class="g-label">Sessions required</div><div class="g-value">One (1)</div></div>
       <div class="glance-item"><div class="g-label">Location</div><div class="g-value">ETH Zurich</div></div>
+      <div class="glance-item"><div class="g-label">Session period</div><div class="g-value">June 15–July 15</div></div>
       <div class="glance-item"><div class="g-label">Compensation</div><div class="g-value">CHF 25</div></div>
       <div class="glance-item"><div class="g-label">Instrument</div><div class="g-value">Provided by lab</div></div>
     </div>
@@ -266,7 +293,7 @@
     </table>
 
     <!-- 3 -->
-    <h2>3 · What Is Investigated and How?</h2>
+    <!-- <h2>3 · What Is Investigated and How?</h2>
     <p>
       This study investigates how skilled violinists coordinate body and bow movement, bow–string contact
       force, and sound production. The goal is to build a research dataset of synchronised motion, force,
@@ -280,10 +307,10 @@
       <li><strong>Custom force-sensing bow setup</strong> — measures bow–string contact force in real time; the bow is provided by the lab</li>
       <li><strong>External microphone</strong> — records the produced sound, synchronised with motion and force data</li>
       <li><strong>Short background form</strong> — age category, years of violin experience, self-reported playing level</li>
-    </ul>
+    </ul> -->
 
-    <!-- 4 -->
-    <h2>4 · Who Can Participate?</h2>
+    <!-- 3 -->
+    <h2>3 · Who Can Participate?</h2>
     <div class="two-col">
       <div class="criteria-box incl">
         <div class="c-title">✓ You may participate if you …</div>
@@ -316,20 +343,30 @@
     <p>Additional possible discomforts are temporary muscular fatigue or mild strain from normal playing, and
     mild inconvenience from the instrumented bow setup. Participants may pause or stop at any time.</p>
 
-    <!-- 5 -->
-    <h2>5 · What Am I Supposed to Do?</h2>
+    <!-- 4 -->
+    <h2>4 · What Am I Supposed to Do?</h2>
     <p>
       You will attend <strong>one in-person session</strong> at ETH Zurich.
       Please prepare <strong>one or more musical pieces</strong> with a total duration of
-      <strong>3 to 15 minutes</strong> that you can play smoothly.
-      The lab provides the violin and bow — you do not need to bring your own instrument.
+      <strong>1 to 10 minutes</strong> that you can play smoothly.
+      The lab provides the violin and bow, and stand — you do not need to bring your own instrument.
     </p>
 
+    <p><strong>Piece selection criteria:</strong></p>
+    <ol class="criteria-list">
+      <li>A piece that you can play very well; a music stand will be provided for you to keep sheet music.</li>
+      <li>A piece that doesn't have copyright issues (for example: avoid commercial/Disney repertoire).</li>
+      <li>Prefer a full piece (e.g., Bach minuet); selected parts are also welcome (e.g., coda of Sibelius Concerto).</li>
+      <li>Length should ideally be between 1 to 10 minutes.</li>
+      <li>Diverse genres are welcomed (folk music, jazz, etc.).</li>
+    </ol>
+
+    <p><strong>The composition of the session:</strong></p>
     <ol class="steps">
       <li><span class="num">1</span><div><span class="step-time">~15 min </span>Welcome, study overview, and written informed consent</div></li>
-      <li><span class="num">2</span><div><span class="step-time">~15 min </span>Sensor setup: reflective markers attached to bow and instrument; calibration</div></li>
-      <li><span class="num">3</span><div><span class="step-time">~10 min </span>Warm-up and sound check</div></li>
-      <li><span class="num">4</span><div><span class="step-time">~15 min </span>Recording — play the prepared piece(s); trials may be repeated to improve quality</div></li>
+      <li><span class="num">2</span><div><span class="step-time">~10 min </span>Sensor setup: markers attached to bow and instrument; calibration</div></li>
+      <li><span class="num">3</span><div><span class="step-time">~10 min </span>Warm-up and practice</div></li>
+      <li><span class="num">4</span><div><span class="step-time">~20 min </span>Recording — play the prepared piece(s); trials may be repeated to improve quality</div></li>
       <li><span class="num">5</span><div><span class="step-time">~10 min </span>Equipment removal, short background form, and wrap-up</div></li>
     </ol>
 
@@ -338,8 +375,8 @@
       without giving a reason and without any disadvantage.
     </div>
 
-    <!-- 6 -->
-    <h2>6 · Compensation</h2>
+    <!-- 5 -->
+    <h2>5 · Compensation</h2>
     <p>
       Participants receive <strong>CHF 25 per session</strong> (cash or equivalent voucher).
       Compensation is provided regardless of whether the full session is completed, unless you withdraw
@@ -390,6 +427,10 @@
       </div>
     </div>
 
+    <ol class="footnotes" aria-label="Footnotes">
+      <li id="fn1">See <a href="https://metaverse-ai-lab-thu.github.io/String-Performance-Dataset-SPD/" target="_blank" rel="noopener">https://metaverse-ai-lab-thu.github.io/String-Performance-Dataset-SPD/</a>.</li>
+    </ol>
+
   </div><!-- /.body -->
 
   <div class="signup-banner">
@@ -397,7 +438,7 @@
       <strong>Ready to sign up?</strong>
       Fill out the form — it takes about 5 minutes. We will contact you to schedule your session.
     </div>
-    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up →</a>
+    <a class="signup-btn" href="https://docs.google.com/forms/d/e/1FAIpQLScBvg3L9aCwDaN2HkErQFBNhkxiTNuEm5pRcO5IgzcGij9dhA/viewform?usp=dialog" target="_blank" rel="noopener">Sign up (June 15–July 15, 2026)</a>
   </div>
 
   <footer>
