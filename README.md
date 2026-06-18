@@ -141,7 +141,33 @@ The apriltags models are at [here](figures/Apriltags).
 
 The Mocap data processing pipeline is not yet opensourced.
 
-## License
+## Data Compression
+
+To capture human motion and instrument pose at the same time, we used visible light motion capturing system (different from usual IR based mocap system).
+
+The raw data of motion capture is trmendously big. At [ETH AIT volumetric capturing lab](https://volumetric-capture.ait.ethz.ch/), the produced data is aronud 200GB per second.
+
+For more efficient data transmission, storage and processing, we developed ways to compress the raw data into more compact forms. We have provided a script for compressing `.dng` raw images of motion capture frames into mp4 videos or jpg images. With mp4 compression, we can have a compression rate of over `2000x`.
+
+This script works with any generic directory structure. It replaces dng files with mp4 videos or jpg files in the destination path, and copies any other files as-is.
+
+This command will compress the dataset into mp4 files:
+
+```bash
+python compress_dataset.py --src SRC_PATH --dst DST_PATH --skip-preview --crf 30 --workers 4 --resume
+```
+
+The `--crf` option controls the quality, the lower the better quality and larger size. 30 keeps the details of the images and still have a very small file volume.
+
+This command will compress the dataset into jpg files:
+
+```bash
+python compress_dataset.py --src /mnt/ait/work/srl_lab/cameras/SRL_lab/violin_test_Jun16 --dst /mnt/violin/Violin_test_Jun16 --skip-preview --format jpg --jpeg-quality 85 --workers 4
+```
+
+Teh `--jpeg-quality` controls the quality, the higher the better quality. 85 is a very high quality, usually we can lower this to 65 or even smaller numbers.
+
+# License
 
 This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
 Free for research and personal use. Commercial use is prohibited.  
