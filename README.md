@@ -157,7 +157,8 @@ This command will compress the dataset into mp4 files:
 python compress_dataset.py --src SRC_PATH --dst DST_PATH --skip-preview --crf 30 --workers 4 --resume
 ```
 
-The `--crf` option controls the quality, the lower the better quality and larger size. 30 keeps the details of the images and still have a very small file volume.
+
+The `--crf` option controls the quality, the lower the better quality and larger size. 30 keeps the details of the images and still have a very small file volume. Notice that MP4 encoding uses motion compensation, which uses predicted pixel block movement to encode motion thus harmful for accuracy of motion capture. So if you want unbiased data, we recommend you use the following jpg style compression, which preserves the motion but loses pixel color fidelity.
 
 This command will compress the dataset into jpg files:
 
