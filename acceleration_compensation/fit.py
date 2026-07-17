@@ -33,15 +33,53 @@ import pandas as pd
 
 from acceleration_compensation.recordings import load_recorded_csv
 
-ACC_COLS = ("acc_x_ema_mg", "acc_y_ema_mg", "acc_z_ema_mg")
-GYR_COLS = ("gyr_x_ema_dps", "gyr_y_ema_dps", "gyr_z_ema_dps")
-AANG_COLS = ("aang_x_ema_dps2", "aang_y_ema_dps2", "aang_z_ema_dps2")
-TARGET_COL = "mV_ema"
+ACC_EMA_COLS = ("acc_x_ema_mg", "acc_y_ema_mg", "acc_z_ema_mg")
+GYR_EMA_COLS = ("gyr_x_ema_dps", "gyr_y_ema_dps", "gyr_z_ema_dps")
+AANG_EMA_COLS = ("aang_x_ema_dps2", "aang_y_ema_dps2", "aang_z_ema_dps2")
+
+ACC_RAW_COLS = ("acc_x_mg", "acc_y_mg", "acc_z_mg")
+GYR_RAW_COLS = ("gyr_x_dps", "gyr_y_dps", "gyr_z_dps")
+AANG_RAW_COLS = ("aang_x_raw_dps2", "aang_y_raw_dps2", "aang_z_raw_dps2")
+
+# Each target pairs with IMU features of matching provenance: the EMA-smoothed
+# target mV_ema pairs with EMA IMU columns; the unsmoothed mV_raw pairs with raw
+# IMU columns so nothing in the raw pipeline is low-pass filtered.
+FEATURE_SETS = {
+    "mV_ema": ("ema", ACC_EMA_COLS, GYR_EMA_COLS, AANG_EMA_COLS),
+    "mV_raw": ("raw", ACC_RAW_COLS, GYR_RAW_COLS, AANG_RAW_COLS),
+}
+DEFAULT_TARGET = "mV_ema"
 
 DEFAULT_N_PAST = 4
 DEFAULT_N_FUTURE = 0
 # Per frame: acc (mg) + gyro (dps) + angular accel (deg/s²)
 VALUES_PER_FRAME = 9
+
+
+@dataclass(frozen=True)
+class FeatureSpec:
+    """Target column and the IMU feature columns paired with it."""
+
+    target: str
+    feature_set: str  # "ema" or "raw"
+    acc_cols: tuple[str, ...]
+    gyr_cols: tuple[str, ...]
+    aang_cols: tuple[str, ...]
+
+    @property
+    def feature_columns(self) -> list[str]:
+        return list(self.acc_cols) + list(self.gyr_cols) + list(self.aang_cols)
+
+
+def make_feature_spec(target: str) -> FeatureSpec:
+    feature_set, acc_cols, gyr_cols, aang_cols = FEATURE_SETS[target]
+    return FeatureSpec(
+        target=target,
+        feature_set=feature_set,
+        acc_cols=acc_cols,
+        gyr_cols=gyr_cols,
+        aang_cols=aang_cols,
+    )
 
 
 @dataclass
@@ -293,6 +331,15 @@ def parse_args() -> argparse.Namespace:
         help="Number of future frames in each stacked feature window.",
     )
     p.add_argument(
+        "--target",
+        choices=tuple(FEATURE_SETS),
+        default=DEFAULT_TARGET,
+        help=(
+            "Signal to predict and compensate. 'mV_ema' uses EMA IMU features; "
+            "'mV_raw' uses raw (unsmoothed) IMU features and yields raw numbers."
+        ),
+    )
+    p.add_argument(
         "--model",
         choices=("linear", "mlp"),
         default="linear",
@@ -338,12 +385,12 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
-def load_data(csv_files: list[Path]) -> pd.DataFrame:
+def load_data(csv_files: list[Path], spec: FeatureSpec) -> pd.DataFrame:
     """1. Load and concatenate recordings; validate required columns."""
     frames = [load_recorded_csv(p, require_imu=True) for p in csv_files]
     df = pd.concat(frames, axis=0, ignore_index=True)
 
-    need = set(ACC_COLS) | set(GYR_COLS) | {"arduino_timestamp_us", TARGET_COL}
+    need = set(spec.acc_cols) | set(spec.gyr_cols) | {"arduino_timestamp_us", spec.target}
     missing = [c for c in sorted(need) if c not in df.columns]
     if missing:
         raise ValueError(f"Missing columns: {missing}")
@@ -359,17 +406,17 @@ def frame_vector(
     return np.hstack([acc_row, gyr_row, aang_row])
 
 
-def create_dataset(df: pd.DataFrame, n_past: int, n_future: int) -> StackedDataset:
+def create_dataset(df: pd.DataFrame, n_past: int, n_future: int, spec: FeatureSpec) -> StackedDataset:
     """
     2. Build stacked windows: for center index i, use frames
     i - n_past … i + n_future (inclusive). Target y = mV[i].
     """
     ts_us = df["arduino_timestamp_us"].to_numpy(dtype=np.float64)
-    mV = df[TARGET_COL].to_numpy(dtype=np.float64)
-    acc = df[list(ACC_COLS)].to_numpy(dtype=np.float64)
-    gyr = df[list(GYR_COLS)].to_numpy(dtype=np.float64)
-    if set(AANG_COLS).issubset(df.columns):
-        aang = df[list(AANG_COLS)].to_numpy(dtype=np.float64)
+    mV = df[spec.target].to_numpy(dtype=np.float64)
+    acc = df[list(spec.acc_cols)].to_numpy(dtype=np.float64)
+    gyr = df[list(spec.gyr_cols)].to_numpy(dtype=np.float64)
+    if set(spec.aang_cols).issubset(df.columns):
+        aang = df[list(spec.aang_cols)].to_numpy(dtype=np.float64)
     else:
         # Backward compatibility for older CSVs without EMA angular acceleration.
         aang = np.zeros_like(gyr, dtype=np.float64)
@@ -426,6 +473,10 @@ def _compute_metrics(y: np.ndarray, y_hat: np.ndarray) -> dict[str, float]:
         "mae": mae,
         "r2": r2,
         "ss_res": ss_res,
+        # Distribution of the fit residual y - y_pred.
+        "residual_median": float(np.median(residual)),
+        "residual_p5": float(np.percentile(residual, 5)),
+        "residual_p95": float(np.percentile(residual, 95)),
     }
 
 
@@ -453,13 +504,13 @@ def fit_model(dataset: StackedDataset, trainer: BaseTrainer) -> FitResult:
     )
 
 
-def print_fit_results(result: FitResult, n_past: int, n_future: int) -> None:
+def print_fit_results(result: FitResult, n_past: int, n_future: int, spec: FeatureSpec) -> None:
     """4. Print metrics and coefficients."""
     metrics = result.metrics
     n_frames = n_past + 1 + n_future
     n_features = n_frames * VALUES_PER_FRAME
     print(
-        f"Target: {TARGET_COL}  (samples: {int(metrics['n'])})  "
+        f"Target: {spec.target}  features={spec.feature_set}  (samples: {int(metrics['n'])})  "
         f"model={result.model_name} trainer={result.extra['trainer']}"
     )
     print(
@@ -483,6 +534,10 @@ def print_fit_results(result: FitResult, n_past: int, n_future: int) -> None:
         print(f"  {'bias':12s}  {b: .8g}")
     print(
         f"RMSE: {metrics['rmse']:.6g}  MAE: {metrics['mae']:.6g}  R²: {metrics['r2']:.6f}"
+    )
+    print(
+        f"Residual y - y_pred:  median {metrics['residual_median']: .6g}  "
+        f"p5 {metrics['residual_p5']: .6g}  p95 {metrics['residual_p95']: .6g}"
     )
 
 
@@ -517,6 +572,7 @@ def save_coefficients(
     csv_files: list[Path],
     n_past: int,
     n_future: int,
+    spec: FeatureSpec,
     mv_ema_alpha: float,
     aang_ema_alpha: float,
 ) -> None:
@@ -525,14 +581,19 @@ def save_coefficients(
     model: BaseModel = result.extra["model"]
     n_frames = n_past + 1 + n_future
     n_features = n_frames * VALUES_PER_FRAME
+    # Tag non-default (raw) models so they sit alongside the EMA model instead of
+    # overwriting it; the EMA default keeps its historic filename.
+    tag = "" if spec.feature_set == "ema" else f"_{spec.feature_set}"
     for csv_path in csv_files:
         resolved = csv_path.expanduser().resolve()
-        out_path = resolved.with_name(f"{resolved.stem}_{result.model_name}_model.json")
-        artifact_base = resolved.with_name(f"{resolved.stem}_{result.model_name}_weights")
+        out_path = resolved.with_name(f"{resolved.stem}_{result.model_name}{tag}_model.json")
+        artifact_base = resolved.with_name(f"{resolved.stem}_{result.model_name}{tag}_weights")
         artifacts = model.save_artifacts(artifact_base)
         payload = {
             "source_csv": str(resolved),
-            "target": TARGET_COL,
+            "target": spec.target,
+            "feature_set": spec.feature_set,
+            "feature_columns": spec.feature_columns,
             "model": result.model_name,
             "trainer": result.extra["trainer"],
             "n_past": n_past,
@@ -557,8 +618,9 @@ def main() -> int:
     try:
         if args.n_past < 0 or args.n_future < 0:
             raise ValueError("--n-past and --n-future must be non-negative.")
-        df = load_data(list(args.csv_files))
-        dataset = create_dataset(df, n_past=args.n_past, n_future=args.n_future)
+        spec = make_feature_spec(args.target)
+        df = load_data(list(args.csv_files), spec)
+        dataset = create_dataset(df, n_past=args.n_past, n_future=args.n_future, spec=spec)
         if args.model == "linear":
             trainer: BaseTrainer = LinearLeastSquaresTrainer()
         else:
@@ -573,12 +635,13 @@ def main() -> int:
         print(e, file=sys.stderr)
         return 1
 
-    print_fit_results(result, n_past=args.n_past, n_future=args.n_future)
+    print_fit_results(result, n_past=args.n_past, n_future=args.n_future, spec=spec)
     save_coefficients(
         result,
         list(args.csv_files),
         n_past=args.n_past,
         n_future=args.n_future,
+        spec=spec,
         mv_ema_alpha=args.mv_ema_alpha,
         aang_ema_alpha=args.aang_ema_alpha,
     )
