@@ -1,0 +1,7 @@
+name: stm32
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pyserial=3.5
+  - matplotlib>=3.6

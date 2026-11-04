@@ -1,175 +1,108 @@
-# Force-sensing Violin/Cello Bow Setup
+# Bow calibration
 
-This repo provides a systemetical way to capture human violin playing data.
+Record and fit paired readings from the bow’s onboard full bridge strain gauge and an external
+force gauge. Contact positions are fractions of usable bow length from the frog
+(0) to the tip (1).
 
-## Preparation (From Scratch)
+## Setup
 
-- Arduino Uno (R3 or R4)
-- High Precision AD HAT [Weshare](https://www.waveshare.com/wiki/High-Precision_AD_HAT?srsltid=AfmBOor1leXM9xe6-7A1BlTC_wxGtR8Agmfxziime16S2sFWXsUajrSs)
-- BNO055 board [DFRobot](https://wiki.dfrobot.com/sen0374/)
-- Bow attached with strain gauges
+Use Python 3.10 or newer:
 
-## Wirings (From Scratch)
-
-Before powering the board, please check twice the connections to avoid burning the board!!!
-
-Arduino UNO -> AD HAT:
-
-- Arduino `D13 (SCK)` -> `SCLK`
-- Arduino `D11 (MOSI)` -> `DIN`
-- Arduino `D12 (MISO)` -> `DOUT`
-- Arduino `D10` -> `CS`
-- Arduino `D2` -> `DRDY`
-- Arduino `D4` -> `RESET` / `REST`
-- Arduino `5V` -> `VCC` (digital logic supply)
-- Arduino `5V` -> `AVDD` (analog supply) via the screw terminal block
-
-For the differential mode used in this project, the following shoud NOT be connected:
-- `GND` -> `AVSS`
-
-AD Hat to Bow Bridge
-
-- AD Hat `IN0-VCC` -> Bow `E+`
-- AD Hat `IN0-GND` -> Bow `E-`
-- AD Hat `IN0-AIN` -> Bow `S+`
-- AD Hat `IN1-AIN` -> Bow `S-`
-
-Arduino UNO -> BNO055
-
-- Arduino `SDA` -> `SDA`
-- Arduino `SCL` -> `SCL`
-- Arduino `5V` -> `VCC`
-- Arduino `GND` -> `GND`
-
-Arduino UNO -> LTC signal
-
-- Arduino `D3` -> Normalized input
-
-The Normalized input is the raw input biased to fit the Arduino logic.
-
-## Wirings (Already integrated)
-
-- Label ADC:L and ADC:R to ADC. Read the section above to understand the connector orientation.
-- Label AVDD to the AVDD screw terminal on the ADC board.
-- Label ARD:1, ARD:2 and ARD:3 to Arduino. Read the section above to understand the connector orientation.
-
-## Compiling
-
-Before powering the board, please check twice the connections to avoid burning the board!!!
-
-1. Connect the Arduino to computer
-2. Connect the Arduino to 9-12V power input
-3. List boards connected 
-
-```bash
-arduino-cli board list
+```sh
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python calibrate.py --list-ports
 ```
 
-4. Compile controller program (pick the right FQBN for your board, as displayed by the previous command)
+Connect each sensor to its own serial port:
 
-```bash
-arduino-cli compile --fqbn <FQBN> realtime-arduino/ads1263_bno055_reader
+| Device | Serial settings |
+| --- | --- |
+| Bow-v2/v3 | 1,500,000 baud, 8N1 |
+| External force gauge | Modbus RTU, 9600 baud, 8N1, address 1 |
+
+See [Bow-v2 hardware and firmware](Bow-v2/README.md) for board designs, wiring,
+and firmware setup. Set the force gauge to live/track mode and zero it while unloaded.
+Replace the example port names below with your device paths.
+
+## Monitor external force
+
+```sh
+python monitor_force.py --port /dev/cu.FORCE_ADAPTER
 ```
 
-5. Upload program to controller
+Displays timestamped force in newtons at up to 10 Hz. Press Ctrl+C to stop.
+Close the monitor before using the same port for calibration.
 
-```bash
-arduino-cli upload -p <PORT> --fqbn <FQBN> realtime-arduino/ads1263_bno055_reader
+## Collect calibration data
+
+For a bow with 0.61 m usable length:
+
+```sh
+python calibrate.py \
+  --bow-port /dev/cu.BOW_ADAPTER \
+  --force-port /dev/cu.FORCE_ADAPTER \
+  --bow-length-m 0.61 \
+  --output recordings/bow1/bow-calibration.csv
 ```
 
-6. Monitor output
+1. Keep bow tension, mounting, and force direction consistent.
+2. Move the contact point to the prompted position and press Enter.
+3. After the one-second settling period, slowly increase and decrease the force
+   while keeping the contact position fixed.
+4. Repeat for all ten positions. Check the printed force range at each position.
 
-For graphical monitoring:
+Each position records 100 pairs at up to 10 Hz. Adjust these with
+`--samples-per-position`, `--poll-hz`, and `--settle-s`.
+For a 0.61 m bow, positions run from 30.5 to 579.5 mm from the frog.
 
-```bash
-python realtime-arduino/graphics_logger.py
+The CSV contains position, full-bridge counts and millivolts, external force in
+newtons, timestamps, and raw packets. The companion JSON records settings and
+run status. Samples are paired using host receipt times. Type `q` at a prompt
+or press Ctrl+C to stop; collected data stays saved. Use a fresh output filename
+for each run.
+
+## Plot recorded points
+
+```sh
+python plot_calibration.py recordings/bow1/bow-calibration.csv --show
 ```
 
-This script supports loading fitted acceleration compensation model and display the compensated readings in realtime.
+Creates a 3D scatter plot with external force (N), bowing fraction, and
+full-bridge reading (mV). Saves `<input-stem>-3d.png`; `--show` opens the plot.
 
-For legacy command-line based monitoring and recording:
+## Fit a calibration model
 
-```bash
-python realtime-arduino/stream_logger.py --port <PORT> --baud 230400 --output recordings/ads1263.csv
+```sh
+python fit_calibration.py recordings/bow1/bow-calibration.csv --show
+python fit_calibration.py recordings/bow1/bow-calibration.csv --model bilinear --show
 ```
 
-## Calibration
+Here `x` is external force (N), `y` is bowing fraction, and `z` is full-bridge
+reading (mV).
 
-Calibration requires the Arduino already running the controller above.
+| Model | Function | Output stem |
+| --- | --- | --- |
+| `simple` (default) | `z = a*x*y + c` | `<input-stem>-fit` |
+| `bilinear` | `z = a*x*y + b*x + c*y + d` | `<input-stem>-fit-bilinear` |
 
-```bash
-python realtime-arduino/calibration.py calibrations/bow.json
+Both models use least squares and exclude rows where external force equals zero.
+The JSON saves coefficients and fit metrics: RMSE, MAE, maximum absolute error,
+and R². The PNG overlays the fitted surface and the measured points used for
+fitting.
+
+With `--show`, left-drag to rotate, middle-drag to pan, and right-drag to zoom.
+Keep toolbar Pan/Zoom modes off while rotating. Close the window to finish.
+
+Use `--bow-units raw24` for ADC counts, `--output` for the fit JSON path, and
+`--plot-output` for the fitted plot path. Run any script with `--help` for options.
+
+## References and tests
+
+- [Bow-v2 hardware and firmware](Bow-v2/README.md)
+- [Force gauge protocol](manuals/Modbus_RTU规约_SH_通信协议.pdf)
+
+```sh
+python -m unittest discover -s tests -v
 ```
-
-The calibration data will be appended to the old file if exists.
-
-## Calibration Fitting
-
-```bash
-python analysis_calibration_data.py calibrations/bow.json
-```
-
-This will generate the quadratic terms for the calibration in `calibrations/bow_params.json`
-
-## Acceleration Compensation
-
-Acceleration Compensation requires a recorded csv file generated by `realtime-arduino/stream_logger.py`
-
-```bash
-python acceleration_compensation/fit.py recordings/ads1263.csv --model <mlp/linear> --epochs 1000 --n-past 10 --n-future 0
-```
-
-The program will save the fitted model to the same directory of the csv file.
-
-## LTC Input
-
-LTC input requires an additional LM2903P chip for pulling the input voltage to Arduino logic. The [ltc_reader](realtime-arduino/ads1263_bno055_reader/ads1263_bno055_reader.ino) includes a sample code for displaying received LTC timestamps, the [main_program](realtime-arduino/ads1263_bno055_reader/ads1263_bno055_reader.ino) supports LTC input, when LTC input is available, timestamps will automatically be included in the saved trace files. Files need modifications on `LTC_FPS` to adapt to your specific LTC setting.
-
-The schematics for LTC reading circuit are included [in this file](figures/Circuit/SCH_Schematic2_2026-04-30.pdf). The circuit is capable of detecting very small signals (less than 100mVpp) to large signals (up to 3.3Vpp). The signal is not required to be centered at 0V.
-
-You may generate LTC signals by playing LTC audio generated [on this website](https://elteesee.pehrhovey.net) and wire it to the LTC input circuit through the 3.5mm Audio Jack.
-
-The compatibility with [Cubase LTC](https://www.steinberg.help/r/cubase-pro/15.0/en/cubase_nuendo/topics/synchronization/synchronization_timecode_standards_c.html) still requires confirmation, but in theory it should work.
-
-# Data Collection with Mocap
-
-The sensorized bow can be used together with april tag clamps on the bow and the violin to do violin playing motion data captuer.
-
-The 3D model files for the clamps are at [OnShape](https://cad.onshape.com/documents/7d9b660bd9e12f1896edefd1/w/8b9ee4686a368937af61d3e0/e/939a0500c785a22a848d996b). These models are also licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).
-
-The apriltags models are at [here](figures/Apriltags).
-
-The Mocap data processing pipeline is not yet opensourced.
-
-## Data Compression
-
-To capture human motion and instrument pose at the same time, we used visible light motion capturing system (different from usual IR based mocap system).
-
-The raw data of motion capture is trmendously big. At [ETH AIT volumetric capturing lab](https://volumetric-capture.ait.ethz.ch/), the produced data is aronud 200GB per second.
-
-For more efficient data transmission, storage and processing, we developed ways to compress the raw data into more compact forms. We have provided a script for compressing `.dng` raw images of motion capture frames into mp4 videos or jpg images. With mp4 compression, we can have a compression rate of over `2000x`.
-
-This script works with any generic directory structure. It replaces dng files with mp4 videos or jpg files in the destination path, and copies any other files as-is.
-
-This command will compress the dataset into mp4 files:
-
-```bash
-python compress_dataset.py --src SRC_PATH --dst DST_PATH --skip-preview --crf 30 --workers 4 --resume
-```
-
-
-The `--crf` option controls the quality, the lower the better quality and larger size. 30 keeps the details of the images and still have a very small file volume. Notice that MP4 encoding uses motion compensation, which uses predicted pixel block movement to encode motion thus harmful for accuracy of motion capture. So if you want unbiased data, we recommend you use the following jpg style compression, which preserves the motion but loses pixel color fidelity.
-
-This command will compress the dataset into jpg files:
-
-```bash
-python compress_dataset.py --src /mnt/ait/work/srl_lab/cameras/SRL_lab/violin_test_Jun16 --dst /mnt/violin/Violin_test_Jun16 --skip-preview --format jpg --jpeg-quality 85 --workers 4
-```
-
-Teh `--jpeg-quality` controls the quality, the higher the better quality. 85 is a very high quality, usually we can lower this to 65 or even smaller numbers.
-
-# License
-
-This project is licensed under [CC BY-NC-SA 4.0](https://creativecommons.org/licenses/by-nc-sa/4.0/).  
-Free for research and personal use. Commercial use is prohibited.  
-Derivatives must use the same license.
