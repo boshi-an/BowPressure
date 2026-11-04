@@ -4,6 +4,25 @@ Electronics for measuring bow strain and motion, with half-bridge and full-bridg
 inputs, a six-axis IMU, and an LTC timecode input. The firmware streams readings
 to a computer over UART.
 
+## Tsinghua hardware version
+
+The hardware supplied to Tsinghua is **V2 bow fitted with a V3 board and V3
+firmware**. There are two cello bows (`v2-1` and `v2-2`) and two violin bows (`v2-3` and `v2-4`) in the shipment.
+Use the V3 board documentation and firmware targets for these bows.
+
+The supplied accessories are:
+
+| Item | Connection and purpose |
+| --- | --- |
+| Programming cable | J3 to the ST-LINK adapter for firmware programming over SWD |
+| Data cable | J1 to the USB-TTL adapter for streaming sensor data to the computer |
+| USB-TTL adapter | Serial connection between the data cable and the computer |
+| ST-LINK adapter | Programming connection between the programming cable and the computer |
+
+The bow calibration files are available in [calibrations.zip](../recordings/calibrations.zip).
+
+Inquire the author if anything is missing or broken.
+
 ## Hardware design
 
 | Folder | Contents |
