@@ -17,9 +17,14 @@ The following J1 wiring applies to Board-v2, Board-v3, and Board-v3.5:
 | J1.4 | 5V | USB 5 V power supply |
 
 Leave USB-TTL TX disconnected. Power the board through J1 during both recording
-and programming. Connect the strain bridges according to the matching design PDF
-in the [hardware guide](Bow-v2/README.md). Board-v4 uses differential communication
+and programming. On an assembled bow, the strain bridges are already connected.
+For a new board assembly, follow the matching design PDF in the
+[hardware guide](Bow-v2/README.md). Board-v4 uses differential communication
 and does not use this USB-TTL data connection.
+
+When using the matching arrow-marked cable plugs, the **small arrow should face
+up at the USB-TTL and ST-LINK adapter ends**. For other cables or adapters,
+verify the pin mapping rather than relying on this orientation.
 
 ### Programming and reset
 
@@ -31,6 +36,10 @@ When using a Waveshare mini ST-LINK/V2, connect J3 as follows:
 | J3.3 — NRST | RST / NRST |
 | J3.4 — SWCLK | SWCLK |
 | J3.5 — SWDIO | SWDIO |
+
+**Connect both cables during programming:** J1 to the USB-TTL adapter for
+board power, and J3 to the ST-LINK adapter for programming. Connect both
+adapters to the computer and keep both cables connected throughout programming.
 
 Open STM32CubeProgrammer, select ST-LINK and SWD, connect, and program the
 matching HEX file. Verify the download, then reset the MCU. Reset is also possible
