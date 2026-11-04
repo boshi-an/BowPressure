@@ -11,6 +11,8 @@ from pathlib import Path
 import struct
 import time
 import serial
+from imu_time import ImuClock, FIELDS as IMU_TIME_FIELDS
+from sample_time import adc_time, FIELDS as SAMPLE_TIME_FIELDS
 from serial.tools import list_ports
 
 SYNC = b'\xa5\x5a'
@@ -61,7 +63,7 @@ class Decoder:
                 break
             frame = bytes(self.buffer[:32])
             crc = struct.unpack_from('<H', frame, 30)[0]
-            if frame[2] != 2 or frame[3] not in (1, 2, 3, 4, 5) or binascii.crc_hqx(frame[:30], 0xFFFF) != crc:
+            if frame[2] != 2 or frame[3] not in (1, 2, 3, 4, 5, 6) or binascii.crc_hqx(frame[:30], 0xFFFF) != crc:
                 self.crc_errors += 1
                 self.discard(1)
                 continue
@@ -88,6 +90,10 @@ def decode_frame(frame):
         status, pin, count, irq, polls, observed, peak = struct.unpack_from('<BBHIIIH', frame, 12)
         item.update(imu_status=status, int1_pin=pin, fifo_count=count,
                     irq_count=irq, poll_count=polls, observed_us=observed, peak_count=peak)
+    elif kind == 6:
+        h, m, s, frame, fps, boundary, edge = struct.unpack_from('<6BI', frame, 12)
+        item.update(timecode=f'{h:02}:{m:02}:{s:02}:{frame:02}', fps=fps,
+                    boundary=boundary, edge_us=edge)
     elif kind == 4:
         h, m, s, f, fps, locked, edges, errors, overflows = struct.unpack_from('<6BIII', frame, 12)
         item.update(timecode=f'{h:02}:{m:02}:{s:02}:{f:02}', fps=fps,
@@ -111,6 +117,8 @@ class Tracking:
         self.total = dict(self.counts)
         self.imu_ts = None
         self.timing_errors = 0
+        self.imu_clock = ImuClock()
+        self.imu_time = {}
 
     def update(self, f):
         now = f['read_us']
@@ -141,6 +149,7 @@ class Tracking:
                 if not 500 <= dt <= 750:
                     self.timing_errors += 1
             self.imu_ts = f['sensor_us16']
+            self.imu_time = self.imu_clock.update(f['sensor_us16'], self.extended_us, f['seq'], self.epoch)
         elif typ == 2:
             key = 'H' if f['channel'] == 0 else 'F'
         else:
@@ -180,15 +189,15 @@ CSV_FIELDS = [
     'tx_drops', 'missed_slots', 'max_late_us', 'faults', 'alive',
     'imu_status_hex', 'int1_pin', 'fifo_count', 'irq_count', 'poll_count',
     'observed_us', 'peak_count', 'crc_errors', 'seq_errors', 'imu_dt_errors',
-    'invalid_payloads', 'message',
-]
+    'invalid_payloads', 'message', 'ltc_anchor_mcu_us', 'ltc_anchor_day_us',
+] + IMU_TIME_FIELDS + SAMPLE_TIME_FIELDS
 
 
 def csv_record(f, tracking, dt, avdd, host_time):
     """One received packet per row; unrelated columns remain empty, never held."""
     typ = f['type']
     row = dict(host_unix_s=host_time,
-               record_type={1: 'IMU', 2: 'ADC', 3: 'STATUS', 4: 'LTC', 5: 'IMU_STATUS'}[typ],
+               record_type={1: 'IMU', 2: 'ADC', 3: 'STATUS', 4: 'LTC', 5: 'IMU_STATUS', 6: 'LTC_ANCHOR'}[typ],
                epoch=tracking.epoch, seq=f['seq'], mcu_read_us=f['read_us'],
                mcu_read_us_unwrapped=tracking.extended_us)
     if typ == 1:
@@ -196,12 +205,22 @@ def csv_record(f, tracking, dt, avdd, host_time):
         row.update(zip(('ax_raw', 'ay_raw', 'az_raw', 'gx_raw', 'gy_raw', 'gz_raw'), f['raw']))
         row.update(zip(('ax_g', 'ay_g', 'az_g', 'gx_dps', 'gy_dps', 'gz_dps'), (*a, *g)))
         row.update(sensor_us16=f['sensor_us16'], sensor_dt_us=dt)
+        row.update(tracking.imu_time)
+        row.update(sample_mcu_us=tracking.imu_time['imu_sample_mcu_us'],
+                   sample_time_basis='imu_clock_map_estimate')
     elif typ == 2:
         row.update(channel='H' if f['channel'] == 0 else 'F',
                    conversion_start_us=f['start_us'], ready_observed_after_us=f['age_us'],
                    raw24=f['raw'], diff_mV=f['raw'] * avdd * 1000 / (8388608 * f['gain']),
                    gain=f['gain'], avdd_V=avdd, status_hex=f"0x{f['status']:04X}",
                    fault_mask_hex=f"0x{(~(f['status'] >> 8)) & 0xFE:02X}")
+        row.update(adc_time(f['read_us'], tracking.extended_us, f['start_us'], f['age_us']))
+    elif typ == 6:
+        h, m, s, frame = map(int, f['timecode'].split(':'))
+        row.update(timecode=f['timecode'], fps=f['fps'])
+        if f['fps'] == 25 and f['boundary'] == 1 and h < 24 and m < 60 and s < 60 and frame < 25:
+            row.update(ltc_anchor_mcu_us=tracking.extended_us-((f['read_us']-f['edge_us']) & 0xffffffff),
+                       ltc_anchor_day_us=(((h*60+m)*60+s)*1000000+(frame+1)*40000) % 86400000000)
     elif typ == 3:
         row.update({k: f[k] for k in ('tx_drops', 'missed_slots', 'max_late_us', 'faults', 'alive')})
     elif typ == 4:
@@ -213,21 +232,23 @@ def csv_record(f, tracking, dt, avdd, host_time):
     return row
 
 
-def main():
+def main(argv=None, control=None, report=print, on_sample=None, output_provider=None):
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--port')
     p.add_argument('--list', action='store_true')
     p.add_argument('--baud', type=int, default=1500000)
     p.add_argument('--duration', type=float)
+    p.add_argument('--output', type=Path, help='New run directory: adc.csv, imu.csv, ltc.csv, mcu.csv')
     p.add_argument('--csv', type=Path, help='NEW shared CSV: IMU, ADC H/F, LTC, status and FIFO diagnostics')
+    p.add_argument('--ltc-csv', type=Path, help='On exit, export compact LTC-timed CSV; requires --csv raw recording')
     p.add_argument('--ltc-lines', action='store_true', help='print every received LTC frame')
     p.add_argument('--avdd', type=float, default=3.3)
     p.add_argument('--lines', action='store_true', help='refresh four values on every data frame; may slow terminal')
     p.add_argument('--diagnostics', action='store_true', help='also show startup, rates and diagnostic summary')
-    args = p.parse_args()
+    args = p.parse_args(argv)
     if args.list:
         for port in list_ports.comports():
-            print(port.device, port.description)
+            report(port.device, port.description)
         return 0
     if not args.port:
         p.error('--port required')
@@ -235,8 +256,18 @@ def main():
         p.error('--duration must be positive')
     if not 2.7 <= args.avdd <= 3.6:
         p.error('--avdd must be 2.7..3.6V')
+    if args.output and (args.csv or args.ltc_csv):
+        p.error('--output cannot be combined with --csv or --ltc-csv')
+    if args.output and args.output.exists():
+        p.error('--output must be a new directory; existing recordings are never overwritten')
     if args.csv and args.csv.exists():
         p.error('CSV must be a new file; existing recordings are never overwritten')
+    if args.ltc_csv and not args.csv:
+        p.error('--ltc-csv requires --csv for raw recording')
+    if args.ltc_csv and args.ltc_csv.exists():
+        p.error('LTC CSV must be a new file')
+    if args.ltc_csv and args.ltc_csv.resolve() == args.csv.resolve():
+        p.error('Raw CSV and LTC CSV must have different paths')
     decoder, tracking = Decoder(), Tracking()
     latest, health = {}, {}
     last_arrival = {}
@@ -246,20 +277,34 @@ def main():
     try:
         with ExitStack() as stack:
             writer = handle = None
+            if args.output:
+                from run_output import RunOutput
+                writer = handle = stack.enter_context(RunOutput(args.output))
+                report(f'分项CSV保存到：{args.output.resolve()}；结束时生成 merged.csv（LTC时间映射）')
             if args.csv:
                 args.csv.parent.mkdir(parents=True, exist_ok=True)
                 handle = stack.enter_context(args.csv.open('x', newline='', encoding='utf-8'))
                 writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
                 writer.writeheader()
-                print(f'全部数据保存到：{args.csv.resolve()}')
+                report(f'全部数据保存到：{args.csv.resolve()}')
             port = serial.Serial(port=None, baudrate=args.baud, timeout=.05)
             port.dtr = port.rts = False
             port.port = args.port
             port.open()
             stack.callback(port.close)
             if args.diagnostics:
-                print(f'读取 {args.port} {args.baud} 8N1；IMU1600Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
+                report(f'读取 {args.port} {args.baud} 8N1；IMU1600Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
             while args.duration is None or time.monotonic() - started < args.duration:
+                action = control() if control else 'recording'
+                if action == 'stopping':
+                    break
+                if writer is None and output_provider and action == 'recording':
+                    destination = output_provider()
+                    if destination:
+                        from run_output import RunOutput
+                        writer = handle = stack.enter_context(RunOutput(destination))
+                        report(f'开始保存到：{destination}')
+                saving = action not in ('paused', 'previewing')
                 chunk = port.read(min(4096, max(1, port.in_waiting)))
                 for f in decoder.feed(chunk):
                     typ = f['type']
@@ -288,25 +333,31 @@ def main():
                         latest[ch] = mv
                     elif typ == 5:
                         latest['imu_diag'] = f
+                    elif typ == 6:
+                        pass  # Precision anchor saved to CSV; not a health packet.
                     elif typ == 4:
                         latest['ltc'] = f['timecode'] if f['locked'] else 'UNLOCKED'
                         latest['ltc_received'] = time.monotonic()
                         if args.ltc_lines:
-                            print(f"LTC {latest['ltc']} {f['fps']}fps edges={f['edges']} "
+                            report(f"LTC {latest['ltc']} {f['fps']}fps edges={f['edges']} "
                                   f"errors={f['errors']} overflow={f['overflows']}")
                     else:
                         health = f
-                    if writer:
+                    row = None
+                    if (writer and saving) or (on_sample and typ in (1, 2)):
                         row = csv_record(f, tracking, dt, args.avdd, host_time)
+                    if on_sample and typ in (1, 2):
+                        on_sample(dict(row, recording=saving and writer is not None))
+                    if writer and saving:
                         row.update(crc_errors=decoder.crc_errors, seq_errors=tracking.seq_errors,
                                    imu_dt_errors=tracking.timing_errors, invalid_payloads=invalid)
                         writer.writerow(row)
                     if args.lines and typ in (1, 2):
-                        print(format_display(latest))
+                        report(format_display(latest))
                 for message in decoder.messages:
                     if args.diagnostics:
-                        print(message)
-                    if writer:
+                        report(message)
+                    if writer and saving:
                         writer.writerow(dict(host_unix_s=time.time(), record_type='LOG', message=message.rstrip('\r')))
                 decoder.messages.clear()
                 now = time.monotonic()
@@ -319,18 +370,18 @@ def main():
                         for key in stale:
                             rates[key] = 0.0
                         if stale:
-                            print('数据超时（超过1秒未收到新样本）：' + ', '.join(stale))
+                            report('数据超时（超过1秒未收到新样本）：' + ', '.join(stale))
                         if health and now - started > 3 and 'imu_diag' not in latest and not no_diag_warned:
-                            print('未收到FIFO诊断包：请确认已烧录最新 build/v3.hex；仅更新Python不会更新MCU。')
+                            report('未收到FIFO诊断包：请确认已烧录最新 build/v3.hex；仅更新Python不会更新MCU。')
                             no_diag_warned = True
-                        print('速率(MCU时间) ' + ' '.join(f'{k}={v:.1f}Hz' for k,v in rates.items()) +
+                        report('速率(MCU时间) ' + ' '.join(f'{k}={v:.1f}Hz' for k,v in rates.items()) +
                               f' CRC错误={decoder.crc_errors} seq_err={tracking.seq_errors} dt_err={tracking.timing_errors}' +
                               f" TX丢帧={health.get('tx_drops', '?')} ADC错过时隙={health.get('missed_slots', '?')}" +
                               f" 最大发起延迟={health.get('max_late_us', '?')}us 故障={health.get('faults', '?')} 存活={health.get('alive', '?')}" +
                               f' ADC故障帧={adc_faults} 饱和={saturated}')
                         if 'imu_diag' in latest:
                             diag = latest['imu_diag']
-                            print(f"IMU诊断 STATUS=0x{diag['imu_status']:02X} FIFO={diag['fifo_count']}帧 "
+                            report(f"IMU诊断 STATUS=0x{diag['imu_status']:02X} FIFO={diag['fifo_count']}帧 "
                                   f"峰值={diag['peak_count']} INT1={diag['int1_pin']} IRQ={diag['irq_count']} "
                                   f"读取次数={diag['poll_count']} 最后读取={diag['observed_us']}us")
                     # Never present a held last sample as fresh sensor data.
@@ -340,7 +391,7 @@ def main():
                             for name in names:
                                 shown.pop(name, None)
                     if not args.lines:
-                        print(format_display(shown))
+                        report(format_display(shown))
                     if handle:
                         handle.flush()
                     last_display = now
@@ -349,10 +400,15 @@ def main():
     except BrokenPipeError:
         raise  # Handled by cli(); do not print another message to a closed pipe.
     except (OSError, serial.SerialException) as exc:
-        print(f'错误：{exc}')
+        report(f'错误：{exc}')
         return 1
+    if args.ltc_csv:
+        from export_ltc import export
+        args.ltc_csv.parent.mkdir(parents=True, exist_ok=True)
+        count, synced = export(args.csv, args.ltc_csv)
+        report(f'LTC精简CSV：{args.ltc_csv.resolve()}；{synced}/{count}行已映射，其余时间留空')
     if args.diagnostics:
-        print(f'结束：总帧数={tracking.total}；当前epoch速率={tracking.rates()}；'
+        report(f'结束：总帧数={tracking.total}；当前epoch速率={tracking.rates()}；'
               f'CRC错误={decoder.crc_errors} 序号异常={tracking.seq_errors} IMU间隔异常={tracking.timing_errors} '
               f'无效载荷={invalid} ADC故障帧={adc_faults} 饱和={saturated}；最后状态={health}')
     return 0

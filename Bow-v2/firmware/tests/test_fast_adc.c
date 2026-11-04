@@ -38,6 +38,12 @@ static void send_packet(uint8_t type, uint32_t seq, uint32_t time_us, const uint
     events[n++] = 'P'; memcpy(last_payload,p,18); last_read = time_us;
     now += 70; /* Even an expensive CRC must occur AFTER next START. */
 }
+static void adc_drdy_prepare(void) {}
+static bool adc_drdy_take(uint32_t start, uint32_t *ready) {
+    (void)start;
+    if (GPIOA->IDR & 8) return false;
+    *ready=now; return true;
+}
 #include "../src/fast_adc.inc"
 static void reset(void) {
     n=sent=now=fault_flags=channel=adc_events_used=start_adc=adc_seq=late_slots=max_late=0;

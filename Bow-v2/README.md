@@ -1,125 +1,86 @@
-# Bow hardware and firmware
+# Bow-v2 hardware and firmware reference
 
-Electronics for measuring bow strain and motion, with half-bridge and full-bridge
-inputs, a six-axis IMU, and an LTC timecode input. The firmware streams readings
-to a computer over UART.
+For the Tsinghua hardware, cable connections, programming, recording console,
+host scripts, and external force calibration, use the [main README](../README.md).
+This document covers the design archive, revision-specific details, and
+implementation notes.
 
-## Tsinghua hardware version
+## Design archive
 
-The hardware supplied to Tsinghua is **V2 bow fitted with a V3 board and V3
-firmware**. There are two cello bows (`v2-1` and `v2-2`) and two violin bows (`v2-3` and `v2-4`) in the shipment.
-Use the V3 board documentation and firmware targets for these bows.
-
-The supplied accessories are:
-
-| Item | Connection and purpose |
+| Directory | Contents |
 | --- | --- |
-| Programming cable | J3 to the ST-LINK adapter for firmware programming over SWD |
-| Data cable | J1 to the USB-TTL adapter for streaming sensor data to the computer |
-| USB-TTL adapter | Serial connection between the data cable and the computer |
-| ST-LINK adapter | Programming connection between the programming cable and the computer |
-
-The bow calibration files are available in [calibrations.zip](../recordings/calibrations.zip).
-
-Inquire the author if anything is missing or broken.
-
-## Hardware design
-
-| Folder | Contents |
-| --- | --- |
-| [design/](design/) | EDA projects, connection guides, bills of materials, Gerbers, and placement files |
-| [firmware/](firmware/) | STM32 firmware, serial readers, plotting tools, and tests |
+| [design/](design/) | EDA projects, complete design PDFs, and manufacturing exports |
+| [firmware/](firmware/) | STM32 firmware, host tools, and tests |
 | [specs/](specs/) | Component datasheets |
+| [tools/](tools/) | EPRO2 inspection and design-PDF generation tools |
 
-The board uses an STM32C011F6P6 microcontroller, ADS122S14 ADC, ICM-45686 IMU,
-and TPS7A20 regulator. A TLV7011 comparator conditions the LTC input.
+The electronics use an STM32C011F6P6 MCU, ADS122S14 ADC, ICM-45686 IMU,
+and TPS7A20 regulator. Designs with LTC input use a TLV7011 comparator
+for signal conditioning.
 
-Design files are organized by board revision:
-
-| Revision | EDA project | Design reference |
+| Board revision | EDA project | Complete design and pin connections |
 | --- | --- | --- |
-| V1 | [v1.epro2](design/v1.epro2) | [Design and pin connections](design/Bow-v1_Design_and_Pin_Connections.pdf) |
-| V2 | [v2.epro2](design/v2.epro2) | [Design and pin connections](design/Bow-v2_Design_and_Pin_Connections.pdf) |
-| V3 | [v3.epro2](design/v3.epro2) | [Design and pin connections](design/Bow-v3_Design_and_Pin_Connections.pdf) |
-| V3.5 | [v3.5.epro2](design/v3.5.epro2) | [Design and pin connections](design/Bow-v3.5_Design_and_Pin_Connections.pdf) |
-| V4 | [v4.epro2](design/v4.epro2) | [Design and pin connections](design/Bow-v4_Design_and_Pin_Connections.pdf) |
+| Board-v1 | [Project](design/v1.epro2) | [PDF](design/Bow-v1_Design_and_Pin_Connections.pdf) |
+| Board-v2 | [Project](design/v2.epro2) | [PDF](design/Bow-v2_Design_and_Pin_Connections.pdf) |
+| Board-v3 | [Project](design/v3.epro2) | [PDF](design/Bow-v3_Design_and_Pin_Connections.pdf) |
+| Board-v3.5 | [Project](design/v3.5.epro2) | [PDF](design/Bow-v3.5_Design_and_Pin_Connections.pdf) |
+| Board-v4 | [Project](design/v4.epro2) | [PDF](design/Bow-v4_Design_and_Pin_Connections.pdf) |
 
-Each revision has one complete PDF. V1, V2 and V3.5 guides were regenerated from
-those projects on 2026-11-04; V3/V4 retain their existing guides. Firmware notes
-in the older V3/V4 PDFs may predate the current code; use `firmware/README.md`
-for current acquisition and shared CSV behavior.
+Each board revision has one complete PDF containing its component list and pin
+connections. Existing PDF filenames are retained as archive identifiers;
+select the design using the board-revision column above.
 
-V3.5 adds R21 (2.2 kOhm) from J1.1 LTC to GND, before C20; bridge input nets are
-renamed H1/F1/F2 with unchanged connectivity. It uses the V3 firmware pin mapping.
-V1 preserves known errors: R7 pulls up ADC_DRDY, and IMU SDO is connected to
-ADC_CS. Its J1/J3 pin ordering also differs; the V1 PDF documents the actual
-project and must not be treated as a corrected design for manufacture.
+### Revision-specific notes
 
-Historical manufacturing exports are preserved in
-[manufacturing/v2](design/manufacturing/v2/) and
-[manufacturing/v3](design/manufacturing/v3/), with original export dates.
-These exports are not regenerated V3.5 fabrication files. Superseded split V2
-BOM/connection PDFs and the outdated review text have been removed.
-The reproducible PDF generator is `tools/build_design_pdfs.py` (ReportLab,
-using the macOS Arial Unicode font); it reads the selected PCB and schematic
-from each EPRO2 and regenerates the V1/V2/V3.5 guides.
+- **Board-v1** preserves known wiring errors: R7 pulls up ADC_DRDY, and IMU SDO
+  is connected to ADC_CS. Its J1/J3 pin ordering also differs. The PDF documents
+  the archived project; it is not a corrected design for manufacture.
+- **Board-v3.5** adds R21, a 2.2 kOhm pull-down from J1.1 LTC to GND before C20.
+  Bridge input nets are renamed H1/F1/F2 without changing connectivity.
+- **Board-v4** has a differential communication interface. The current firmware
+  directory does not contain a dedicated Board-v4 configuration.
 
-## Firmware
+### Manufacturing exports and PDF generation
 
-The firmware targets V2 and V3 hardware. Both acquire each bridge at a target
-rate of 1,000 samples/s and IMU data at 1,600 Hz. Serial output uses
-**1,500,000 baud, 8N1**.
+Historical fabrication and placement exports are preserved with their original
+export dates in [Board-v2 manufacturing exports](design/manufacturing/v2/)
+and [Board-v3 manufacturing exports](design/manufacturing/v3/).
+These are not regenerated Board-v3.5 fabrication files.
 
-| Build target | Board | LTC |
-| --- | --- | --- |
-| `v2` | V2 | Enabled |
-| `v2_no_ltc` | V2 | Disabled |
-| `v3` | V3 | Enabled |
-| `v3_no_ltc` | V3 | Disabled |
+[tools/build_design_pdfs.py](tools/build_design_pdfs.py) generates the Board-v1,
+Board-v2, and Board-v3.5 guides from the selected PCB and schematic in each EPRO2
+project. It uses ReportLab and the macOS Arial Unicode font.
+[tools/epro_model.py](tools/epro_model.py) provides the project-reading helpers.
 
-Choose the target matching your board and LTC connection. V3 uses the IMU FIFO
-interrupt and a status LED. Hardware settings are in `firmware/config/`;
-acquisition and protocol code are in `firmware/src/`.
+## Firmware implementation notes
 
-### Build and flash
+Firmware-v2 and Firmware-v3 share acquisition and serial-protocol code.
+Hardware-specific definitions are selected through
+[config/v2.h](firmware/config/v2.h) and
+[config/v3.h](firmware/config/v3.h). The corresponding LTC-disabled builds use
+the same hardware definitions. Firmware-v3 handles ADC DRDY and IMU FIFO
+interrupts by deferring SPI transactions to the main loop.
 
-Install the Arm GNU toolchain (`arm-none-eabi-gcc`) and Make. From this `Bow-v2`
-directory, prepare the Python environment and build the desired target:
+For source changes, run the following from `firmware/` after installing the
+build dependencies described in the main README:
 
 ```sh
-conda env create -f firmware/environment.yml
-conda activate stm32
-cd firmware
-make v3_no_ltc
-make test
+make       # Build all four supported firmware targets.
+make test  # Run the firmware project's automated checks.
 ```
 
-`make` builds all four targets. Outputs are saved in `firmware/build/`.
-Use STM32CubeProgrammer and an ST-LINK connected over SWD to flash the matching
-`.hex` file, verify it, and reset the board.
+Outputs are written to [firmware/build/](firmware/build/). Further implementation
+and protocol details are in the [firmware reference](firmware/README.md).
 
-Follow the [firmware guide](firmware/README.md) for J1 power/data wiring,
-J3 programming connections, and diagnostics.
+## Diagnostic interpretation
 
-### Read and plot sensor data
+| Observation | Interpretation and checks |
+| --- | --- |
+| CRC or sequence-error counters | Check whether they continue increasing. Inspect cable length, grounding, and power. Invalid-CRC packets are discarded. Counters at recording start may include earlier preview activity. |
+| ADC fixed near ±103.125 mV | This is full scale with a 3.3 V reference and PGA gain 32. Check bridge excitation and midpoint connections; it is not a valid force measurement. |
+| IMU FIFO full or fault value 4 | Check for excessive LTC interrupts, supply problems, or SPI wiring faults. After correcting the cause, reset and test again. |
+| SWD connection failure | Try Connect under reset in STM32CubeProgrammer and check NRST, ground, supply, and SWD wiring. |
+| Debugger firmware reported as too old | Use STM32CubeProgrammer's ST-LINK firmware-upgrade function, then reconnect. |
 
-Run from `Bow-v2/firmware/` with the Python environment active:
-
-```sh
-python host/read.py --list
-python host/read.py --port /dev/cu.BOW_ADAPTER --diagnostics
-```
-
-Record 60 seconds and plot the result:
-
-```sh
-python host/read.py --port /dev/cu.BOW_ADAPTER --duration 60 --csv out/record01.csv
-python host/plot.py out/record01.csv --show
-```
-
-Replace the port with your device path and use a fresh CSV filename for each run.
-The recording contains bridge readings, IMU data, timecode, and device status.
-Press Ctrl+C to stop recording.
-
-For paired external-force calibration and model fitting, see the
-[project README](../README.md).
+When programming a raw BIN instead of a HEX file, use flash start address
+`0x08000000`.

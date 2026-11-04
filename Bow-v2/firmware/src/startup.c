@@ -5,6 +5,7 @@ extern void SysTick_Handler(void);
 extern void TIM3_IRQHandler(void);
 extern void EXTI0_1_IRQHandler(void);
 extern void EXTI4_15_IRQHandler(void);
+extern void EXTI2_3_IRQHandler(void);
 void Default_Handler(void) { for (;;) __asm volatile ("wfi"); }
 void Reset_Handler(void) {
     uint32_t *src = &_sidata;
@@ -21,7 +22,7 @@ void (*const vectors[48])(void) = {
     [2] = Default_Handler, [3] = Default_Handler,
     [11] = Default_Handler, [14] = Default_Handler, [15] = SysTick_Handler,
     [16 ... 20] = Default_Handler, [21] = EXTI0_1_IRQHandler,
-    [22] = Default_Handler, [23] = EXTI4_15_IRQHandler,
+    [22] = EXTI2_3_IRQHandler, [23] = EXTI4_15_IRQHandler,
     [24 ... 31] = Default_Handler, [32] = TIM3_IRQHandler,
     [33 ... 47] = Default_Handler
 };

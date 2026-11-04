@@ -2,6 +2,8 @@
 """Plot a shared recording CSV as ACC, GYRO, H, F; no filtering/resampling."""
 import argparse
 import csv
+from contextlib import ExitStack
+from itertools import chain
 import math
 from pathlib import Path
 
@@ -31,9 +33,13 @@ def load_recording(path, epoch=None):
     skipped = 0
     required = {'record_type', 'epoch', 'mcu_read_us_unwrapped', 'channel',
                 *SERIES['ACC'], *SERIES['GYRO'], 'diff_mV'}
-    with Path(path).open(newline='', encoding='utf-8-sig') as handle:
-        reader = csv.DictReader(handle)
-        missing = required - set(reader.fieldnames or [])
+    path = Path(path)
+    paths = [path/'imu.csv', path/'adc.csv'] if path.is_dir() else [path]
+    with ExitStack() as stack:
+        readers = [csv.DictReader(stack.enter_context(p.open(newline='', encoding='utf-8-sig'))) for p in paths]
+        columns = set().union(*(set(r.fieldnames or []) for r in readers))
+        reader = chain.from_iterable(readers)
+        missing = required - columns
         if missing:
             raise ValueError('缺少统一CSV列：' + ', '.join(sorted(missing)))
         for row in reader:
@@ -44,7 +50,10 @@ def load_recording(path, epoch=None):
                 ep = int(row['epoch'])
                 if epoch is not None and ep != epoch:
                     continue
-                t = float(row['mcu_read_us_unwrapped']) / 1e6
+                timestamp = row.get('sample_mcu_us')
+                if not timestamp and kind == 'IMU':
+                    timestamp = row.get('imu_sample_mcu_us')
+                t = float(timestamp or row['mcu_read_us_unwrapped']) / 1e6
                 if not math.isfinite(t):
                     raise ValueError()
                 if kind == 'IMU':

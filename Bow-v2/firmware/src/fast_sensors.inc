@@ -58,6 +58,7 @@ static bool fast_imu_init(void) {
 }
 static bool adc_alive, imu_alive;
 static uint32_t imu_seq, fault_flags;
+#include "fast_adc_irq.inc"
 #include "fast_adc.inc"
 enum { IMU_GUARD_US = 200, IMU_FIFO_CAPACITY = 2048 / 20 };
 static bool background_allowed(void) {
@@ -74,7 +75,7 @@ static bool background_allowed(void) {
 int main(void) {
     board_init(); delay_ms(300);
     put_str("# Bow hardware V"); put_uint(BOARD_REV);
-    put_str(" fast timer-DMA v9 FIFOcached LTC25: IMU1600Hz HIRES fixed-scale32g/4000dps AAF+LPF400Hz; bridges1000SPS each mode3 OSR256 gain32; SPI=");
+    put_str(" fast timer-DMA v11 LTC-edge25: IMU1600Hz HIRES fixed-scale32g/4000dps AAF+LPF400Hz; bridges1000SPS each mode3 OSR256 gain32; SPI=");
     put_uint(CPU_HZ >> (SPI_BR + 1)); put_str(" UART"); put_uint(BAUD); put_str("; binary v2 follows init\r\n");
 #ifdef DISABLE_LTC_IRQ
     put_str("# LTC disabled: PA0 EXTI off; IMU/ADC full stream; LTC counters stay zero\r\n");
@@ -87,6 +88,9 @@ int main(void) {
     }
     imu_alive = true;
     put_str(BOARD_REV >= 3 ? "# INT1 PA6: 2-frame watermark, 5ms fallback; LED PA4 active-low\r\n" : "# V2 FIFO polling\r\n");
+#if BOARD_REV >= 3
+    put_str("# ADC DRDY PA3 EXTI3 enabled; SPI in main; level fallback\r\n");
+#endif
     put_str("# BINARY_START\r\n");
     tx_init();
     RCC->APBENR1 |= RCC_APBENR1_TIM3EN;
@@ -98,7 +102,7 @@ int main(void) {
     NVIC_SetPriority(SysTick_IRQn, 1);
     NVIC_EnableIRQ(TIM3_IRQn);
     TIM3->CR1 = TIM_CR1_CEN;
-    ltc_init(); imu_irq_init();
+    adc_drdy_init(); ltc_init(); imu_irq_init();
     uint32_t next_status = 0, status_seq = 0;
     for (;;) {
         tx_pump(); fast_adc_poll();

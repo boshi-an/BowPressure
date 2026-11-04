@@ -43,6 +43,9 @@ class SharedCsvTests(unittest.TestCase):
                 rows = list(csv.DictReader(handle))
             self.assertEqual([r['record_type'] for r in rows],
                              ['IMU', 'ADC', 'ADC', 'STATUS', 'LTC', 'IMU_STATUS', 'STATUS', 'LOG'])
+            self.assertEqual(rows[0]['imu_sample_mcu_us'], '100.0')
+            self.assertEqual(rows[0]['imu_time_quality'], 'warmup')
+            self.assertEqual(rows[1]['imu_sample_mcu_us'], '')
             self.assertEqual(rows[0]['ax_raw'], '16384')
             self.assertEqual(float(rows[0]['ax_g']), 1.0)
             self.assertEqual(rows[0]['raw24'], '')

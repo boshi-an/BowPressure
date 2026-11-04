@@ -1,7 +1,7 @@
 #include "ltc_decode.h"
 /* EXTI owns producer, main owns consumer. Keep ISR short and never touch SPI. */
 enum { LTC_RING = 128, LTC_MASK = LTC_RING - 1 };
-static volatile uint16_t ltc_intervals[LTC_RING];
+static volatile uint16_t ltc_intervals[LTC_RING], ltc_edge_ticks[LTC_RING], ltc_edge_ms[LTC_RING];
 static volatile unsigned ltc_in, ltc_out;
 static volatile uint32_t ltc_edges, ltc_overflows;
 static LtcDecoder ltc_decoder;
@@ -22,6 +22,8 @@ void EXTI0_1_IRQHandler(void) {
     unsigned next = (ltc_in + 1) & LTC_MASK;
     if (next == ltc_out) { ++ltc_overflows; return; }
     ltc_intervals[ltc_in] = dt;
+    ltc_edge_ticks[ltc_in] = now;
+    ltc_edge_ms[ltc_in] = (uint16_t)ms;
     __DMB(); ltc_in = next;
 }
 static void ltc_init(void) {
@@ -51,6 +53,17 @@ static void ltc_send(uint32_t now, bool locked) {
     send_packet(4, ltc_seq++, now, p);
     ltc_next_report = now + 1000000;
 }
+/* A complete BMC bit is decoded at its END boundary. The final sync bit's
+ * ending edge therefore marks the START of the NEXT 25fps frame. Keep the
+ * packet header at main-loop time to preserve transport timestamp ordering. */
+static void ltc_send_anchor(uint32_t now, uint16_t tick) {
+    static uint32_t seq;
+    uint8_t p[18] = {0};
+    for (unsigned j=0; j<4; ++j) p[j]=ltc_decoder.tc[j];
+    p[4]=25; p[5]=1; /* forward frame-end anchor, not frame-start */
+    pack32(p+6, now-(uint16_t)((uint16_t)now-tick));
+    send_packet(6, seq++, now, p);
+}
 static void fast_ltc_poll(void) {
     if (ltc_seen_overflows != ltc_overflows) {
         uint32_t irq=__get_PRIMASK(); __disable_irq();
@@ -60,9 +73,13 @@ static void fast_ltc_poll(void) {
     /* Recheck ADC deadline for every edge, including frame validation work. */
     for (unsigned n=0; n<8 && ltc_out!=ltc_in && background_allowed(); ++n) {
         __DMB(); unsigned dt=ltc_intervals[ltc_out];
+        uint16_t edge_tick=ltc_edge_ticks[ltc_out];
+        uint16_t edge_ms=ltc_edge_ms[ltc_out];
         ltc_out=(ltc_out+1)&LTC_MASK;
+        if ((uint16_t)((uint16_t)ticks-edge_ms)>50) { ltc_reset(&ltc_decoder); continue; }
         if (ltc_interval(&ltc_decoder, dt)) {
             ltc_last_good=clock_us(); ltc_send(ltc_last_good, true);
+            ltc_send_anchor(ltc_last_good, edge_tick);
         }
     }
     uint32_t now=clock_us();
