@@ -9,6 +9,10 @@ are used for recording. The supplied J3 programming cable and **Waveshare mini
 ST-LINK/V2** are used for programming. Use the Board-v3 documentation and
 Firmware-v3 build targets for these bows.
 
+**Both cables are provided:** the J1 data cable and the J3 programming cable.
+At the **USB-TTL and ST-LINK adapter ends**, insert each plug with its
+**small arrow facing up**.
+
 See the [board design reference](Bow-v2/README.md#design-archive)
 and the supplied [calibration files](recordings/calibrations.zip).
 
@@ -24,8 +28,7 @@ The following J1 wiring applies to Board-v2, Board-v3, and Board-v3.5:
 | J1.4 | 5V | USB 5 V power supply |
 
 Leave USB-TTL TX disconnected. Power the board through J1 during both recording
-and programming. Connect the strain bridges according to the matching design PDF
-in the [hardware guide](Bow-v2/README.md). Board-v4 uses differential communication
+and programming. Board-v4 uses differential communication
 and does not use this USB-TTL data connection.
 
 ### Programming and reset
@@ -38,6 +41,10 @@ For the Tsinghua hardware, use the supplied Waveshare mini ST-LINK/V2 and J3 cab
 | J3.3 — NRST | RST / NRST |
 | J3.4 — SWCLK | SWCLK |
 | J3.5 — SWDIO | SWDIO |
+
+**Connect both cables during programming:** connect J1 to the USB-TTL adapter
+for board power, and J3 to the ST-LINK adapter for programming. Connect both
+adapters to the computer and keep both cables connected throughout programming.
 
 Open STM32CubeProgrammer, select ST-LINK and SWD, connect, and program the
 matching HEX file. Verify the download, then reset the MCU. Reset is also possible
