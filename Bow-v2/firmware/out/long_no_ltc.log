@@ -1,0 +1,16 @@
+读取 /dev/cu.usbserial-BG03EL9E 1500000 8N1；IMU1600Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。
+速率(MCU时间) I=1581.2Hz H=1000.0Hz F=1000.0Hz CRC错误=0 seq_err=0 dt_err=0 TX丢帧=0 ADC错过时隙=0 最大发起延迟=10us 故障=0 存活=3 ADC故障帧=0 饱和=2003
+IMU诊断 STATUS=0x02 FIFO=2帧 峰值=2 INT1=0 IRQ=8692 读取次数=8692 最后读取=11000679us
+|a|=1.0053 g  |v_ang|=1.334 °/s  H=+103.124988 mV  F=+103.124988 mV  LTC=UNLOCKED
+速率(MCU时间) I=1580.2Hz H=1000.0Hz F=1000.0Hz CRC错误=0 seq_err=0 dt_err=0 TX丢帧=0 ADC错过时隙=0 最大发起延迟=10us 故障=0 存活=3 ADC故障帧=0 饱和=4018
+IMU诊断 STATUS=0x02 FIFO=2帧 峰值=2 INT1=0 IRQ=9482 读取次数=9482 最后读取=12000719us
+|a|=1.0049 g  |v_ang|=0.516 °/s  H=+103.124988 mV  F=+103.124988 mV  LTC=UNLOCKED
+速率(MCU时间) I=1580.3Hz H=1000.0Hz F=1000.0Hz CRC错误=0 seq_err=0 dt_err=0 TX丢帧=0 ADC错过时隙=0 最大发起延迟=10us 故障=0 存活=3 ADC故障帧=0 饱和=6032
+IMU诊断 STATUS=0x02 FIFO=2帧 峰值=2 INT1=0 IRQ=10272 读取次数=10272 最后读取=13000682us
+|a|=1.0057 g  |v_ang|=0.645 °/s  H=+103.124988 mV  F=+103.124988 mV  LTC=UNLOCKED
+速率(MCU时间) I=1580.1Hz H=1000.0Hz F=1000.0Hz CRC错误=0 seq_err=0 dt_err=0 TX丢帧=0 ADC错过时隙=0 最大发起延迟=10us 故障=0 存活=3 ADC故障帧=0 饱和=8046
+IMU诊断 STATUS=0x02 FIFO=2帧 峰值=2 INT1=0 IRQ=11062 读取次数=11062 最后读取=14000660us
+|a|=1.0044 g  |v_ang|=0.426 °/s  H=+103.124988 mV  F=+103.124988 mV  LTC=UNLOCKED
+速率(MCU时间) I=1580.2Hz H=1000.0Hz F=1000.0Hz CRC错误=0 seq_err=0 dt_err=0 TX丢帧=0 ADC错过时隙=0 最大发起延迟=10us 故障=0 存活=3 ADC故障帧=0 饱和=10059
+IMU诊断 STATUS=0x02 FIFO=2帧 峰值=2 INT1=0 IRQ=11852 读取次数=11852 最后读取=15000740us
+|a|=1.0052 g  |v_ang|=0.333 °/s  H=+103.124988 mV  F=+103.124988 mV  LTC=UNLOCKED

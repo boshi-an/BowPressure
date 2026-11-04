@@ -1,8 +1,5 @@
-calibrations
-.vscode
-*.csv
-recordings
-acceleration_compensation/__pycache__
-realtime-arduino/__pycache__
+__pycache__/
+*.py[cod]
+.venv/
 .DS_Store
-python_service/__pycache__
+recordings/

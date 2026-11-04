@@ -1,0 +1,48 @@
+下载日期：2026-10-06
+四款核心器件及新增 ESD 器件的原厂数据手册；STM32、TDK 文件通过供应商镜像下载，文件保持原样。
+电阻、电容、应变片尚未冻结具体料号，未下载通用替代手册。ESD 候选 D1 已补充官方手册，系统保护效果仍需样机验证。
+
+ADS122S14_Datasheet_TI.pdf
+页数：94
+下载来源：https://www.ti.com/lit/ds/symlink/ads122s14.pdf
+
+ICM-45686_Datasheet_TDK.pdf
+页数：200
+下载来源：https://www.endrich.com/Datenbl%C3%A4tter/Sensoren/Inertialsensoren/ICM-45686.pdf
+
+STM32C011D6_Datasheet_ST.pdf
+版本：DS13866 Rev 5, February 2026
+页数：97
+下载来源：https://datasheet.lcsc.com/datasheet/pdf/204aebbac28cab16beaa771fac451330.pdf?productCode=C25810055
+
+TPS7A20_Datasheet_TI.pdf
+页数：63
+下载来源：https://www.ti.com/lit/ds/symlink/tps7a20.pdf
+
+TPD1E01B04_Datasheet_TI.pdf
+新增于设计修订 v1.1；候选料号 TPD1E01B04DPYR
+版本：SLVSDG3C，Rev C
+下载来源：https://www.ti.com/lit/ds/symlink/tpd1e01b04.pdf
+
+设计版本 v1.2：ADS122S14 改用 AVDD 参考，依据 SBASAI9 p.67 §8.10；REF_SEL=10b，两侧参考缓冲关闭。原厂数据手册及 archive 历史文件保持原样。
+
+设计版本 v1.3：取消 C7/C19，保留位号空缺；两桥合并为五针 J2（GND、3V3、H_RAW、F_PLUS、F_MINUS）；原 SWD J4 改为 J3。器件手册来源不变。
+
+设计版本 v1.4：U3 更换为 STM32C011F6P6TR（TSSOP-20）。现有 STM32C011D6_Datasheet_ST.pdf 实际涵盖整个 STM32C011x4/x6 系列，p.28、87-88 同时给出 TSSOP-20 引脚和封装，可继续使用。
+
+设计版本 v1.5：U4 更换为 TPS7A2033PDBVR / SOT-23-5（DBV）；现有 TPS7A20_Datasheet_TI.pdf p.4 包含此封装引脚，仍可使用。1=IN、2=GND、3=EN、4=NC、5=OUT，无 EP。
+
+设计版本 v1.8（2026-10-11）：新增音频 LTC 调理电路。
+TLV7011_Datasheet_TI.pdf：TI SLVSDM5F Rev F，53页；SOT-23脚号见p.3，电气特性p.5/7，迟滞设计p.17。
+来源：https://www.ti.com/lit/ds/symlink/tlv7011.pdf
+BAT54S_Datasheet_Nexperia.pdf：2022-07-01，9页；pin1=A1、pin2=K2、pin3=K1/A2。
+来源：https://assets.nexperia.com/documents/data-sheet/BAT54S.pdf
+STM32 PA0：现有 DS13866 Rev5 p.31，AF5=TIM1_CH1。LTC时序参考：https://ardour.org/files/doxygen/ltc_8h.html
+
+JST GH 1.25mm connectors | J1 SM04B-GHS-TB / J3 SM05B-GHS-TB; GHR-04V-S / GHR-05V-S; SSHL-002T-P0.2
+https://www.jst-mfg.com/product/pdf/eng/eGH.pdf
+Local: JST_GH_Connector_Datasheet.pdf | retrieved 2026-10-11
+
+D2 | TPD1E10B06DYAR | TI Rev G | retrieved 2026-10-11
+https://www.ti.com/lit/ds/symlink/tpd1e10b06.pdf
+Local: TPD1E10B06_Datasheet_TI.pdf
