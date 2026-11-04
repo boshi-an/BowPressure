@@ -1,6 +1,6 @@
 # Bow-v2 hardware and firmware reference
 
-For the Tsinghua hardware, cable connections, programming, recording console,
+For cable connections, programming, the recording console,
 host scripts, and external force calibration, use the [main README](../README.md).
 This document covers the design archive, revision-specific details, and
 implementation notes.

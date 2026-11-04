@@ -2,15 +2,8 @@
 
 ## On-bow electronics: usage and connections
 
-The **Tsinghua hardware version** uses **Bow-v2** bows fitted with **Board-v3**
-and **Firmware-v3**: two cello bows (**Bow-v2-1**, **Bow-v2-2**) and two violin
-bows (**Bow-v2-3**, **Bow-v2-4**). The supplied J1 data cable and USB-TTL adapter
-are used for recording. The supplied J3 programming cable and **Waveshare mini
-ST-LINK/V2** are used for programming. Use the Board-v3 documentation and
-Firmware-v3 build targets for these bows.
-
-See the [board design reference](Bow-v2/README.md#design-archive)
-and the supplied [calibration files](recordings/calibrations.zip).
+Board design files and pin references are listed in the
+[Bow-v2 design reference](Bow-v2/README.md#design-archive).
 
 ### Power and data connections
 
@@ -30,7 +23,7 @@ and does not use this USB-TTL data connection.
 
 ### Programming and reset
 
-For the Tsinghua hardware, use the supplied Waveshare mini ST-LINK/V2 and J3 cable:
+When using a Waveshare mini ST-LINK/V2, connect J3 as follows:
 
 | Board connector | Waveshare mini ST-LINK/V2 signal |
 | --- | --- |
@@ -50,7 +43,7 @@ by briefly connecting NRST to GND and releasing it, or by cycling power.
 | Board-v3 or Board-v3.5 | Firmware-v3 | `build/v3.hex` |
 | Board-v3 or Board-v3.5, LTC disabled | Firmware-v3_no_ltc | `build/v3_no_ltc.hex` |
 
-For Tsinghua hardware, use Firmware-v3 when receiving LTC, or Firmware-v3_no_ltc
+For Board-v3 and Board-v3.5, use Firmware-v3 when receiving LTC, or Firmware-v3_no_ltc
 when LTC is not needed. A floating LTC input can generate unwanted interrupts;
 the LTC-disabled build avoids processing these interrupts.
 
@@ -184,8 +177,8 @@ for additional wiring and troubleshooting details.
 
 ## Bow calibration with an external force sensor
 
-The Tsinghua calibration setup uses an **Aidebao HP-50** external force gauge,
-purchased from JD.com. Connect it and the bow to separate serial adapters.
+The calibration scripts support the **Aidebao HP-50** external force gauge.
+Connect it and the bow to separate serial adapters.
 
 Run the following commands from the **BowPressure root directory**. If currently
 in `Bow-v2/firmware/`, run `cd ../..` first. Stop the recording console with Ctrl+C
