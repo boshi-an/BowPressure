@@ -1,8 +1,17 @@
 # Bow calibration
 
-Record and fit paired readings from the bow’s onboard full bridge strain gauge and an external
-force gauge. Contact positions are fractions of usable bow length from the frog
-(0) to the tip (1).
+## Hardware preparation
+
+The **Tsinghua hardware version** uses **V2 bows fitted with V3 boards and V3
+firmware**: two cello bows (`v2-1`, `v2-2`) and two violin bows (`v2-3`, `v2-4`).
+Use the V3 board documentation and firmware targets for these bows.
+
+The supplied J1 data cable connects through the USB-TTL adapter for sensor
+readings. The supplied J3 programming cable connects through the ST-LINK adapter
+for firmware programming. See the [Tsinghua hardware guide](Bow-v2/README.md#tsinghua-hardware-version)
+for details and calibration files.
+
+The external force sensor used for Tsinghua hardware calibration is 艾德堡HP-50 from 京东.
 
 ## Setup
 
