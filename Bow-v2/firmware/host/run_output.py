@@ -2,6 +2,7 @@
 import csv
 from pathlib import Path
 from export_ltc import merge_directory
+from serial_rx import RX_FIELDS
 
 COMMON = ['record_type', 'epoch', 'seq',
           'sample_mcu_us', 'mcu_read_us_unwrapped']
@@ -17,7 +18,7 @@ FIELDS = {
     'mcu': COMMON + ['host_unix_s', 'tx_drops', 'missed_slots', 'max_late_us', 'faults',
                      'alive', 'imu_status_hex', 'int1_pin', 'fifo_count', 'irq_count',
                      'poll_count', 'observed_us', 'peak_count', 'crc_errors',
-                     'seq_errors', 'imu_dt_errors', 'invalid_payloads', 'message'],
+                     'seq_errors', 'imu_dt_errors', 'invalid_payloads', 'message'] + RX_FIELDS,
 }
 ROUTE = {'ADC': 'adc', 'IMU': 'imu', 'LTC': 'ltc', 'LTC_ANCHOR': 'ltc',
          'STATUS': 'mcu', 'IMU_STATUS': 'mcu', 'LOG': 'mcu'}

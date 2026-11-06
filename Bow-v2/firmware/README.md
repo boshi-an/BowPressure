@@ -11,6 +11,7 @@ script usage, and the [Bow-v2 design reference](../README.md) for hardware files
 | `src/main.c`, `src/startup.c` | MCU initialization and interrupt vectors |
 | `src/fast_*.inc` | Acquisition, scheduling, LTC, diagnostics, and UART transport |
 | `src/fast_protocol.h` | Packet framing and CRC |
+| `host/serial_rx.py` | Dedicated receiver and byte-bounded 1 MiB queue |
 | `host/imu_time.py`, `host/sample_time.py` | Sensor timestamp estimation |
 | `host/export_ltc.py` | Shared LTC mapping and merged-file export |
 | `tests/` | Host and native firmware-logic checks |
@@ -113,3 +114,20 @@ jumps; a single anchor permits only nominal 1:1 extrapolation.
 These are estimated sample times, not hardware synchronization guarantees.
 Residual FIFO latency, IMU filter delay, analog filtering, comparator delay,
 and interrupt jitter require measurement before claiming absolute accuracy.
+
+## Host receive queue
+
+`SerialReceiver` is the sole serial reader. It reads up to 4096 bytes per call
+and queues immutable chunks under a condition lock, with a 1,048,576-byte payload
+limit. Python object overhead and the in-flight chunk are additional memory.
+The consumer retains decoding, CSV writing, clock mapping, and GUI callbacks.
+On overflow the newest chunk is dropped without blocking reception; a generation
+marker ensures the decoder clears a partial packet before crossing a loss.
+Device errors propagate after already queued chunks have been processed.
+The receive thread is joined before closing the port and finalizing output files.
+
+Diagnostics use `rx_queue_bytes`, `rx_queue_capacity`, `rx_queue_peak_bytes`,
+`rx_received_bytes`, `rx_overflow_events`, and `rx_dropped_bytes` in LOG records.
+Periodic snapshots and overflow notifications share the CLI/GUI report path.
+Overflow counts are per discarded read chunk, not per sensor packet. Final
+occupancy reports unprocessed bytes intentionally left when recording stops.

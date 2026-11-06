@@ -116,6 +116,24 @@ Omit `--output` for monitoring without saving. The default baud rate is 1,500,00
 use `--baud` only when it matches the firmware configuration.
 Stop the console service before running this reader on the same serial device.
 
+### Receive buffering and diagnostics
+
+Both the console and command-line reader use a dedicated serial-receive thread
+with a 1 MiB byte queue (roughly nine seconds at the current data rate).
+The `# RX` line updates once per second with current occupancy, peak occupancy,
+overflow events, and dropped bytes. It is shown below the GUI readings and in
+the terminal, and saved as structured `LOG` rows in `mcu.csv` during recording.
+A final snapshot is logged on shutdown. Counters cover the serial connection,
+including preview, and reset when that connection is reopened.
+
+An overflow means an incoming chunk could not fit: that chunk is discarded,
+the event/byte counters increase, and packet decoding resynchronizes at the gap.
+The receiver continues draining the device. This queue protects against consumer
+processing stalls, but cannot recover bytes lost in the adapter or driver.
+Stop/pause decisions apply when packets are processed; with a backlog, displayed
+samples lag reception. A nonempty final queue records unread backlog at shutdown,
+not an overflow. No firmware update is required.
+
 ### Saved data and time mapping
 
 | File | Contents |
