@@ -32,9 +32,11 @@ class GuiTests(unittest.TestCase):
                 result = main(['--port','fake','--output',str(root)],
                               control=lambda: next(states), report=lambda *a: None)
             self.assertEqual(result, 0)
-            self.assertEqual(port.seq, 3)  # All three packets drained, including paused one.
+            self.assertGreaterEqual(port.seq, 3)  # Receiver may read ahead independently.
             self.assertTrue(port.closed)
-            with (root/'mcu.csv').open() as f: rows = list(csv.DictReader(f))
+            with (root/'mcu.csv').open() as f: all_rows = list(csv.DictReader(f))
+            self.assertTrue(any(r['rx_queue_capacity'] == '1048576' for r in all_rows))
+            rows = [r for r in all_rows if r['record_type'] == 'STATUS']
             self.assertEqual([r['seq'] for r in rows], ['0', '2'])
             self.assertEqual(rows[-1]['seq_errors'], '0')
             self.assertTrue((root/'merged.csv').exists())

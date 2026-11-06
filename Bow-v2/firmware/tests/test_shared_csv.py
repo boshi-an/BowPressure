@@ -42,7 +42,7 @@ class SharedCsvTests(unittest.TestCase):
             with path.open() as handle:
                 rows = list(csv.DictReader(handle))
             self.assertEqual([r['record_type'] for r in rows],
-                             ['IMU', 'ADC', 'ADC', 'STATUS', 'LTC', 'IMU_STATUS', 'STATUS', 'LOG'])
+                             ['IMU', 'ADC', 'ADC', 'STATUS', 'LTC', 'IMU_STATUS', 'STATUS', 'LOG', 'LOG'])
             self.assertEqual(rows[0]['imu_sample_mcu_us'], '100.0')
             self.assertEqual(rows[0]['imu_time_quality'], 'warmup')
             self.assertEqual(rows[1]['imu_sample_mcu_us'], '')
@@ -60,6 +60,8 @@ class SharedCsvTests(unittest.TestCase):
             self.assertEqual(rows[5]['peak_count'], '8')
             self.assertEqual(rows[6]['epoch'], '1')
             self.assertEqual(rows[7]['message'], '# Bow hardware V3')
+            self.assertEqual(rows[-1]['rx_queue_capacity'], '1048576')
+            self.assertEqual(rows[-1]['rx_overflow_events'], '0')
             original = path.read_bytes()
             with patch('sys.argv', ['read.py', '--port', 'fake', '--csv', str(path)]), \
                     patch('sys.stderr', new_callable=io.StringIO):

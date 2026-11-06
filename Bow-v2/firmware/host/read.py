@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import time
 import serial
+from serial_rx import SerialReceiver, RX_FIELDS
 from imu_time import ImuClock, FIELDS as IMU_TIME_FIELDS
 from sample_time import adc_time, FIELDS as SAMPLE_TIME_FIELDS
 from serial.tools import list_ports
@@ -190,7 +191,7 @@ CSV_FIELDS = [
     'imu_status_hex', 'int1_pin', 'fifo_count', 'irq_count', 'poll_count',
     'observed_us', 'peak_count', 'crc_errors', 'seq_errors', 'imu_dt_errors',
     'invalid_payloads', 'message', 'ltc_anchor_mcu_us', 'ltc_anchor_day_us',
-] + IMU_TIME_FIELDS + SAMPLE_TIME_FIELDS
+] + IMU_TIME_FIELDS + SAMPLE_TIME_FIELDS + RX_FIELDS
 
 
 def csv_record(f, tracking, dt, avdd, host_time):
@@ -274,16 +275,39 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
     no_diag_warned = False
     adc_faults = saturated = invalid = 0
     started = last_display = time.monotonic()
+    rx = None
+    rx_generation = 0
+    rx_last_overflow = 0
+    saving = False
+
+    def report_rx(final=False):
+        nonlocal rx_last_overflow
+        if rx is None:
+            return
+        stats = rx.snapshot()
+        overflow = stats['rx_overflow_events'] != rx_last_overflow
+        message = (f"# RX{' FINAL' if final else ''}{' OVERFLOW' if overflow else ''} "
+                   f"queue={stats['rx_queue_bytes']}/{stats['rx_queue_capacity']} B "
+                   f"({100*stats['rx_queue_bytes']/stats['rx_queue_capacity']:.1f}%) "
+                   f"peak={stats['rx_queue_peak_bytes']} B "
+                   f"overflows={stats['rx_overflow_events']} dropped={stats['rx_dropped_bytes']} B")
+        report(message)
+        if writer and saving:
+            writer.writerow(dict(record_type='LOG', host_unix_s=time.time(),
+                                 message=message, **stats))
+        rx_last_overflow = stats['rx_overflow_events']
+
     try:
         with ExitStack() as stack:
+            outputs = stack.enter_context(ExitStack())
             writer = handle = None
             if args.output:
                 from run_output import RunOutput
-                writer = handle = stack.enter_context(RunOutput(args.output))
+                writer = handle = outputs.enter_context(RunOutput(args.output))
                 report(f'分项CSV保存到：{args.output.resolve()}；结束时生成 merged.csv（LTC时间映射）')
             if args.csv:
                 args.csv.parent.mkdir(parents=True, exist_ok=True)
-                handle = stack.enter_context(args.csv.open('x', newline='', encoding='utf-8'))
+                handle = outputs.enter_context(args.csv.open('x', newline='', encoding='utf-8'))
                 writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
                 writer.writeheader()
                 report(f'全部数据保存到：{args.csv.resolve()}')
@@ -292,6 +316,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
             port.port = args.port
             port.open()
             stack.callback(port.close)
+            stack.callback(lambda: report_rx(final=True))
+            rx = stack.enter_context(SerialReceiver(port))
             if args.diagnostics:
                 report(f'读取 {args.port} {args.baud} 8N1；IMU1600Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
             while args.duration is None or time.monotonic() - started < args.duration:
@@ -302,10 +328,16 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                     destination = output_provider()
                     if destination:
                         from run_output import RunOutput
-                        writer = handle = stack.enter_context(RunOutput(destination))
+                        writer = handle = outputs.enter_context(RunOutput(destination))
                         report(f'开始保存到：{destination}')
                 saving = action not in ('paused', 'previewing')
-                chunk = port.read(min(4096, max(1, port.in_waiting)))
+                generation, chunk = rx.get()
+                if generation is not None and generation != rx_generation:
+                    decoder.discard(len(decoder.buffer))
+                    decoder.text.clear()
+                    rx_generation = generation
+                if rx.snapshot()['rx_overflow_events'] != rx_last_overflow:
+                    report_rx()
                 for f in decoder.feed(chunk):
                     typ = f['type']
                     if typ == 2 and (f['channel'] not in (0, 1) or f['gain'] != 32 or not -8388608 <= f['raw'] < 8388608):
@@ -364,6 +396,7 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                 if 'ltc_received' in latest and now - latest['ltc_received'] > .2:
                     latest['ltc'] = 'UNLOCKED'
                 if now - last_display >= 1:
+                    report_rx()
                     if args.diagnostics:
                         rates = tracking.rates()
                         stale = [key for key in rates if now - last_arrival.get(key, started - 2) > 1]
