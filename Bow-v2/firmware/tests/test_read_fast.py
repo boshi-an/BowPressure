@@ -49,7 +49,7 @@ class FastTests(unittest.TestCase):
         self.assertGreaterEqual(d.crc_errors, 2)
 
     def test_wraps_gaps_and_reset(self):
-        t = Tracking()
+        t = Tracking(1600)
         f = {'type':1, 'seq':0xFFFFFFFF, 'read_us':0xFFFFFF00, 'sensor_us16':65000}
         t.update(f)
         self.assertEqual(t.update(dict(f, seq=0, read_us=369, sensor_us16=89)), 625)
@@ -64,7 +64,7 @@ class FastTests(unittest.TestCase):
         self.assertEqual(t.counts['I'], 1)
 
     def test_mixed_rates(self):
-        t = Tracking(); d=Decoder(); seq=0
+        t = Tracking(1600); d=Decoder(); seq=0
         events=[]
         for i in range(160):
             events.append((i*625, packet(1,i,i*625,struct.pack('<6hH',1,2,3,4,5,6,(i*625)%65536))))
@@ -75,6 +75,16 @@ class FastTests(unittest.TestCase):
         self.assertEqual(t.total, {'I':160,'H':100,'F':100})
         self.assertEqual(t.rates(), {'I':1600,'H':1000,'F':1000})
         self.assertEqual(t.seq_errors, 0)
+
+    def test_3200hz_clock_through_wrap(self):
+        tracker = Tracking()
+        for i in range(3201):
+            us = (625*i)//2
+            tracker.update(dict(type=1, seq=i, read_us=us, sensor_us16=us & 0xffff))
+        self.assertEqual(tracker.rates()['I'], 3200)
+        self.assertEqual(tracker.timing_errors, 0)
+        self.assertEqual(tracker.imu_time['imu_time_segment'], 0)
+        self.assertEqual(tracker.imu_time['sensor_us_unwrapped'], 1000000)
 
     def test_units(self):
         a, g = imu_units((16384, -16384, 524286, 131072, -131072, -524286))

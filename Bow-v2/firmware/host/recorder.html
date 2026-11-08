@@ -6,7 +6,7 @@
 </style></head><body><main>
 <div class="head"><div><div class="eyebrow">BOW / DATA CAPTURE</div><h1>录制控制台</h1><p>IMU · 双桥 ADC · LTC 时间同步</p></div><span id="badge" class="badge">正在连接…</span></div>
 <div id="error" role="alert"></div>
-<section class="card"><div class="grid"><div><label for="port">串口设备</label><div class="row"><select id="port"></select><button id="refresh">刷新</button></div></div><div><label for="baud">波特率</label><select id="baud"><option value="1500000">1,500,000 baud</option><option value="115200">115,200 baud</option></select></div>
+<section class="card"><div class="grid"><div><label for="port">串口设备</label><div class="row"><select id="port"></select><button id="refresh">刷新</button></div></div><div><label for="baud">波特率</label><select id="baud"><option value="3000000">3,000,000 baud</option><option value="1500000">1,500,000 baud</option><option value="115200">115,200 baud</option></select></div>
 <div><label for="directory">保存到</label><div class="row"><input id="directory" placeholder="保存目录的绝对路径"><button id="choose">选择目录</button></div></div><div><label for="name">本次录制文件夹</label><input id="name" placeholder="run1"></div></div>
 <div class="controls"><button class="primary" id="start" disabled>开始录制</button><button id="pause" disabled>暂停</button><button id="resume" disabled>继续录制</button><button class="stop" id="stop" disabled>结束录制并保存</button></div>
 <p class="hint">打开网页自动预览，不创建文件；结束录制后自动恢复预览。暂停仅停止写入，串口继续读取；继续后不会补写暂停期间的数据。结束时自动生成 merged.csv。</p><div id="path" class="path"></div></section>

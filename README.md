@@ -61,8 +61,8 @@ For Tsinghua hardware, use Firmware-v3 when receiving LTC, or Firmware-v3_no_ltc
 when LTC is not needed. A floating LTC input can generate unwanted interrupts;
 the LTC-disabled build avoids processing these interrupts.
 
-The nominal IMU rate is 1600 Hz, with each ADC bridge sampled at 1000 samples/s.
-Serial communication uses **1,500,000 baud, 8N1**. Existing HEX files can be flashed
+The nominal IMU rate is 3200 Hz, with each ADC bridge sampled at 1000 samples/s.
+Serial communication uses **3,000,000 baud, 8N1**. Existing HEX files can be flashed
 directly. To rebuild, install Make and `arm-none-eabi-gcc`, then run `make v3`
 or `make v3_no_ltc` from `Bow-v2/firmware/`.
 
@@ -88,7 +88,7 @@ does not open. `--no-browser` suppresses automatic browser opening;
 ### Preview and recording
 
 1. Select the serial device and baud rate while previewing. The default is
-   1,500,000 baud; this selection does not reconfigure the MCU.
+   3,000,000 baud; this selection does not reconfigure the MCU.
 2. Choose a parent output directory and a new recording folder name.
 3. Start recording. Earlier preview data is not saved.
 4. Pause to stop saving while continuing to preview; resume to save new data.
@@ -117,14 +117,14 @@ python host/read.py --port /dev/cu.usbserial-BG03EL9E --output out/run1 --diagno
 
 Replace the example serial path with your device. The output directory must not
 already exist. Press Ctrl+C to finish, or add `--duration 120` for a timed run.
-Omit `--output` for monitoring without saving. The default baud rate is 1,500,000;
+Omit `--output` for monitoring without saving. The default baud rate is 3,000,000;
 use `--baud` only when it matches the firmware configuration.
 Stop the console service before running this reader on the same serial device.
 
 ### Receive buffering and diagnostics
 
 Both the console and command-line reader use a dedicated serial-receive thread
-with a 1 MiB byte queue (roughly nine seconds at the current data rate).
+with a 1 MiB byte queue (roughly six seconds at the current data rate).
 The `# RX` line updates once per second with current occupancy, peak occupancy,
 overflow events, and dropped bytes. It is shown below the GUI readings and in
 the terminal, and saved as structured `LOG` rows in `mcu.csv` during recording.
@@ -233,7 +233,7 @@ Connect each sensor to its own serial port:
 
 | Device | Serial settings |
 | --- | --- |
-| Bow-v2 with Board-v3 and Firmware-v3 | 1,500,000 baud, 8N1 |
+| Bow-v2 with Board-v3 and Firmware-v3 | 3,000,000 baud, 8N1 |
 | External force gauge | Modbus RTU, 9600 baud, 8N1, address 1 |
 
 See [Bow-v2 hardware and firmware](Bow-v2/README.md) for board designs, wiring,

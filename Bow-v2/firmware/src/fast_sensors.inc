@@ -1,6 +1,6 @@
 /* Dedicated nonblocking near-1kHz acquisition. No software smoothing.
  * TI SBASAI9 Table 7-6: mode3/OSR256 latency392/1.024MHz=382.8us.
- * ICM DS-000577: 1600Hz LN, HIRES fixed scale +/-32g +/-4000dps, fixed FIR AAF + UI LPF ODR/4=400Hz. */
+ * ICM DS-000577: 3200Hz LN, HIRES fixed scale +/-32g +/-4000dps, fixed FIR AAF + UI LPF ODR/4=800Hz. */
 #include <stddef.h>
 void *memset(void *dst, int value, size_t n) {
     unsigned char *p = dst;
@@ -35,8 +35,8 @@ static bool fast_write(uint8_t r, uint8_t v) {
 }
 static bool fast_imu_init(void) {
     if (!imu_init()) return false;
-    if (!fast_write(0x10, 0) || !fast_write(0x1B, 0x25) ||
-        !fast_write(0x1C, 0x15)) return init_error("1600Hz ODR/range");
+    if (!fast_write(0x10, 0) || !fast_write(0x1B, 0x24) ||
+        !fast_write(0x1C, 0x14)) return init_error("3200Hz ODR/range");
     /* Preserve unrelated reserved/OIS bits. Fixed FIR on, interpolator off. */
     if (!ireg_checked(0xA4A6, 0x60, 0x20) || !ireg_checked(0xA57B, 0x03, 0x01) ||
         !ireg_checked(0xA4AC, 0x07, 0x01) || !ireg_checked(0xA583, 0x07, 0x01) ||
@@ -75,7 +75,7 @@ static bool background_allowed(void) {
 int main(void) {
     board_init(); delay_ms(300);
     put_str("# Bow hardware V"); put_uint(BOARD_REV);
-    put_str(" fast timer-DMA v11 LTC-edge25: IMU1600Hz HIRES fixed-scale32g/4000dps AAF+LPF400Hz; bridges1000SPS each mode3 OSR256 gain32; SPI=");
+    put_str(" fast timer-DMA v11 LTC-edge25: IMU3200Hz HIRES fixed-scale32g/4000dps AAF+LPF800Hz; bridges1000SPS each mode3 OSR256 gain32; SPI=");
     put_uint(CPU_HZ >> (SPI_BR + 1)); put_str(" UART"); put_uint(BAUD); put_str("; binary v2 follows init\r\n");
 #ifdef DISABLE_LTC_IRQ
     put_str("# LTC disabled: PA0 EXTI off; IMU/ADC full stream; LTC counters stay zero\r\n");

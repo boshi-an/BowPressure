@@ -4,7 +4,7 @@ from imu_time import ImuClock
 
 class ClockTests(unittest.TestCase):
     def test_batching_drift_and_wrap(self):
-        clock = ImuClock()
+        clock = ImuClock(1600)
         last = -1
         errors = []
         for i in range(40000):
@@ -24,7 +24,7 @@ class ClockTests(unittest.TestCase):
         self.assertAlmostEqual(errors[-1], 100, delta=5)  # Unknown fixed delay remains.
 
     def test_gap_reset_and_duplicate(self):
-        c = ImuClock()
+        c = ImuClock(1600)
         a = c.update(65500, 1000, 0xffffffff, 0)
         b = c.update(589, 1625, 0, 0)
         self.assertEqual(a['imu_time_segment'], b['imu_time_segment'])
