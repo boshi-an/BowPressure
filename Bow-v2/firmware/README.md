@@ -29,7 +29,7 @@ only `build/`, leaving recordings untouched. Builds do not flash the board.
 
 | Component | Current configuration |
 | --- | --- |
-| ICM-45686 | 1600 Hz low-noise mode; 20-bit High Resolution FIFO format with fixed ±32 g / ±4000 °/s scaling; AAF and 400 Hz UI low-pass filter |
+| ICM-45686 | 3200 Hz low-noise mode; 20-bit High Resolution FIFO format with fixed ±32 g / ±4000 °/s scaling; AAF and 800 Hz UI low-pass filter |
 | ADS122S14 | Mode 3, OSR 256, PGA 32, AVDD reference; alternating bridges in 500 µs slots |
 | IMU FIFO | 2048 bytes, 20 bytes per frame: 102 complete frames; two-frame interrupt watermark |
 

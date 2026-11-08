@@ -201,7 +201,7 @@ def parse_args(argv=None):
     parser.add_argument("--list-ports", action="store_true", help="list serial ports and exit")
     parser.add_argument("--bow-port", help="Bow-v2/v3 USB-TTL serial port")
     parser.add_argument("--force-port", help="SH Modbus force gauge serial port")
-    parser.add_argument("--bow-baud", type=positive_int, default=1500000)
+    parser.add_argument("--bow-baud", type=positive_int, default=3000000)
     parser.add_argument("--force-baud", type=positive_int, default=9600)
     parser.add_argument("--force-address", type=int, default=1)
     parser.add_argument("--samples-per-position", type=positive_int, default=100)

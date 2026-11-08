@@ -105,7 +105,7 @@ class Recorder:
                 if output.exists():
                     raise ValueError('录制目录已存在，请使用新的名称')
             baud = int(baud)
-            if baud not in (115200, 1500000):
+            if baud not in (115200, 1500000, 3000000):
                 raise ValueError('请选择支持的波特率')
             if promoting:
                 if self.connection != (port, baud):
@@ -151,7 +151,7 @@ class Recorder:
                 raise ValueError('录制或保存期间不能切换串口设置')
             if port not in {p.device for p in list_ports.comports()}:
                 raise ValueError('串口不存在，请刷新设备列表')
-            if baud not in (115200, 1500000):
+            if baud not in (115200, 1500000, 3000000):
                 raise ValueError('请选择支持的波特率')
             if self.state == 'previewing' and self.connection == (port, baud):
                 return

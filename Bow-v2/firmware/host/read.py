@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Receive V2/V3: IMU1600Hz + H/F1000SPS each, raw data, no host smoothing."""
+"""Receive V2/V3: IMU3200Hz + H/F1000SPS each, raw data, no host smoothing."""
 import argparse
 import binascii
 import csv
@@ -106,7 +106,7 @@ def decode_frame(frame):
 
 
 class Tracking:
-    def __init__(self):
+    def __init__(self, imu_rate_hz=3200):
         self.epoch = 0
         self.last_us = None
         self.extended_us = 0
@@ -118,7 +118,7 @@ class Tracking:
         self.total = dict(self.counts)
         self.imu_ts = None
         self.timing_errors = 0
-        self.imu_clock = ImuClock()
+        self.imu_clock = ImuClock(imu_rate_hz)
         self.imu_time = {}
 
     def update(self, f):
@@ -147,7 +147,7 @@ class Tracking:
             key = 'I'
             if self.imu_ts is not None:
                 dt = (f['sensor_us16'] - self.imu_ts) & 0xFFFF
-                if not 500 <= dt <= 750:
+                if not self.imu_clock.valid_interval(dt):
                     self.timing_errors += 1
             self.imu_ts = f['sensor_us16']
             self.imu_time = self.imu_clock.update(f['sensor_us16'], self.extended_us, f['seq'], self.epoch)
@@ -237,7 +237,7 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--port')
     p.add_argument('--list', action='store_true')
-    p.add_argument('--baud', type=int, default=1500000)
+    p.add_argument('--baud', type=int, default=3000000)
     p.add_argument('--duration', type=float)
     p.add_argument('--output', type=Path, help='New run directory: adc.csv, imu.csv, ltc.csv, mcu.csv')
     p.add_argument('--csv', type=Path, help='NEW shared CSV: IMU, ADC H/F, LTC, status and FIFO diagnostics')
@@ -269,7 +269,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
         p.error('LTC CSV must be a new file')
     if args.ltc_csv and args.ltc_csv.resolve() == args.csv.resolve():
         p.error('Raw CSV and LTC CSV must have different paths')
-    decoder, tracking = Decoder(), Tracking()
+    imu_rate_hz = 3200 if args.baud == 3000000 else 1600
+    decoder, tracking = Decoder(), Tracking(imu_rate_hz)
     latest, health = {}, {}
     last_arrival = {}
     no_diag_warned = False
@@ -319,7 +320,7 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
             stack.callback(lambda: report_rx(final=True))
             rx = stack.enter_context(SerialReceiver(port))
             if args.diagnostics:
-                report(f'读取 {args.port} {args.baud} 8N1；IMU1600Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
+                report(f'读取 {args.port} {args.baud} 8N1；IMU{imu_rate_hz}Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
             while args.duration is None or time.monotonic() - started < args.duration:
                 action = control() if control else 'recording'
                 if action == 'stopping':

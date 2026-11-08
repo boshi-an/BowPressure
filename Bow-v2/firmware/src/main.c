@@ -22,7 +22,7 @@
 #endif
 #define CPU_HZ 48000000UL
 #ifndef BAUD
-#define BAUD 1500000UL
+#define BAUD 3000000UL
 #endif
 #define IMU_CS (1UL << 7)     /* PB7, U3.1 */
 #define ADC_CS (1UL << 15)    /* PC15, U3.3 */

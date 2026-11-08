@@ -7,9 +7,14 @@ FIELDS = ['sensor_us_unwrapped', 'imu_sample_mcu_us', 'imu_read_delay_us',
 
 
 class ImuClock:
-    def __init__(self):
+    def __init__(self, rate_hz=3200):
+        period = 1_000_000 / rate_hz
+        self.min_dt, self.max_dt = .8 * period, 1.2 * period
         self.segment = -1
         self.last = None
+
+    def valid_interval(self, dt):
+        return self.min_dt <= dt <= self.max_dt
 
     def update(self, sensor, read, seq, epoch):
         previous = self.last
@@ -17,7 +22,7 @@ class ImuClock:
         # Do not guess how many 16-bit wraps occurred across missing frames.
         restart = (previous is None or epoch != previous[3] or
                    (seq - previous[2]) & 0xffffffff != 1 or
-                   not 500 <= dt <= 750 or read < previous[1])
+                   not self.valid_interval(dt) or read < previous[1])
         if restart:
             self.segment += 1
             self.x = sensor
