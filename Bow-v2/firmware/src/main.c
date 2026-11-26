@@ -24,6 +24,9 @@
 #ifndef BAUD
 #define BAUD 3000000UL
 #endif
+#if BAUD < (CPU_HZ + 65534UL) / 65535UL || BAUD > CPU_HZ / 16UL
+#error BAUD is outside the USART1 divider range
+#endif
 #define IMU_CS (1UL << 7)     /* PB7, U3.1 */
 #define ADC_CS (1UL << 15)    /* PC15, U3.3 */
 static volatile uint32_t ticks;
@@ -221,4 +224,7 @@ static bool imu_init(void) {
     if (!rd(0x10, &value) || (value & 0x0F) != 0x03) return init_error("PWR_MGMT0 readback");
     return true;
 }
+#ifdef BOW_OPTIMIZED
+#include "imu_fifo_dma.inc"
+#endif
 #include "fast_sensors.inc"

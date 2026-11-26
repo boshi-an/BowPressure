@@ -50,21 +50,23 @@ Open STM32CubeProgrammer, select ST-LINK and SWD, connect, and program the
 matching HEX file. Verify the download, then reset the MCU. Reset is also possible
 by briefly connecting NRST to GND and releasing it, or by cycling power.
 
-| Hardware | Firmware target | HEX file, relative to `Bow-v2/firmware/` |
+| Hardware | Make target | HEX file, relative to `Bow-v2/firmware/` |
 | --- | --- | --- |
-| Board-v2 | Firmware-v2 | `build/v2.hex` |
-| Board-v2, LTC disabled | Firmware-v2_no_ltc | `build/v2_no_ltc.hex` |
-| Board-v3 or Board-v3.5 | Firmware-v3 | `build/v3.hex` |
-| Board-v3 or Board-v3.5, LTC disabled | Firmware-v3_no_ltc | `build/v3_no_ltc.hex` |
+| Board-v2 | `v2` | `build/v2.hex` |
+| Board-v2, LTC disabled | `v2_no_ltc` | `build/v2_no_ltc.hex` |
+| Board-v3 or Board-v3.5 | `v3` | `build/v3.hex` |
+| Board-v3 or Board-v3.5, LTC disabled | `v3_no_ltc` | `build/v3_no_ltc.hex` |
 
 For Tsinghua hardware, use Firmware-v3 when receiving LTC, or Firmware-v3_no_ltc
 when LTC is not needed. A floating LTC input can generate unwanted interrupts;
 the LTC-disabled build avoids processing these interrupts.
 
 The nominal IMU rate is 3200 Hz, with each ADC bridge sampled at 1000 samples/s.
-Serial communication uses **3,000,000 baud, 8N1**. Existing HEX files can be flashed
-directly. To rebuild, install Make and `arm-none-eabi-gcc`, then run `make v3`
-or `make v3_no_ltc` from `Bow-v2/firmware/`.
+Firmware-v3 uses batched IMU FIFO DMA and schedules LTC ahead of IMU work when
+the ADC deadline permits. The default serial speed is **3,000,000 baud, 8N1**.
+
+To rebuild the selected target, install Make and `arm-none-eabi-gcc`, then run
+the corresponding `make` command from `Bow-v2/firmware/`.
 
 ## Recording console and host scripts
 

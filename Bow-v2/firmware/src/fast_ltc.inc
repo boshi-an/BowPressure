@@ -1,7 +1,15 @@
 #include "ltc_decode.h"
 /* EXTI owns producer, main owns consumer. Keep ISR short and never touch SPI. */
 enum { LTC_RING = 128, LTC_MASK = LTC_RING - 1 };
+#ifdef BOW_OPTIMIZED
+/* One aligned store per interrupt. Bit 31 marks coalesced edge flags. */
+enum { LTC_EDGE_MS_MASK = 0x7FFF };
+static volatile uint32_t ltc_edge_times[LTC_RING];
+static uint16_t ltc_previous_tick, ltc_previous_ms;
+static bool ltc_have_previous;
+#else
 static volatile uint16_t ltc_intervals[LTC_RING], ltc_edge_ticks[LTC_RING], ltc_edge_ms[LTC_RING];
+#endif
 static volatile unsigned ltc_in, ltc_out;
 static volatile uint32_t ltc_edges, ltc_overflows;
 static LtcDecoder ltc_decoder;
@@ -10,6 +18,17 @@ void EXTI0_1_IRQHandler(void) {
     uint32_t rising=EXTI->RPR1 & 1, falling=EXTI->FPR1 & 1;
     if (!(rising | falling)) return;
     uint16_t now = TIM3->CNT;
+#ifdef BOW_OPTIMIZED
+    uint32_t ms = ticks & LTC_EDGE_MS_MASK;
+    /* Acknowledge only the flags sampled above. The opposite edge can arrive
+       between the pending-register reads and these write-one-to-clear stores. */
+    EXTI->RPR1 = rising; EXTI->FPR1 = falling;
+    ++ltc_edges;
+    unsigned in = ltc_in;
+    unsigned next = (in + 1) & LTC_MASK;
+    if (next == ltc_out) { ++ltc_overflows; return; }
+    ltc_edge_times[in] = ((rising & falling) << 31) | (ms << 16) | now;
+#else
     uint32_t ms = ticks;
     EXTI->RPR1 = 1; EXTI->FPR1 = 1;
     static uint16_t previous;
@@ -24,6 +43,7 @@ void EXTI0_1_IRQHandler(void) {
     ltc_intervals[ltc_in] = dt;
     ltc_edge_ticks[ltc_in] = now;
     ltc_edge_ms[ltc_in] = (uint16_t)ms;
+#endif
     __DMB(); ltc_in = next;
 }
 static void ltc_init(void) {
@@ -69,14 +89,38 @@ static void fast_ltc_poll(void) {
         uint32_t irq=__get_PRIMASK(); __disable_irq();
         ltc_seen_overflows=ltc_overflows; ltc_out=ltc_in;
         __set_PRIMASK(irq); ltc_reset(&ltc_decoder);
+#ifdef BOW_OPTIMIZED
+        ltc_have_previous = false;
+#endif
     }
     /* Recheck ADC deadline for every edge, including frame validation work. */
+#ifdef BOW_OPTIMIZED
+    for (unsigned n=0; n<4 && ltc_out!=ltc_in && background_allowed(); ++n) {
+        __DMB();
+        unsigned out = ltc_out;
+        uint32_t captured = ltc_edge_times[out];
+        ltc_out = (out + 1) & LTC_MASK;
+        uint16_t edge_tick = captured;
+        uint16_t edge_ms = (captured >> 16) & LTC_EDGE_MS_MASK;
+        if (((ticks - edge_ms) & LTC_EDGE_MS_MASK) > 50) {
+            ltc_reset(&ltc_decoder);
+            ltc_have_previous = false;
+            continue;
+        }
+        unsigned dt = (uint16_t)(edge_tick - ltc_previous_tick);
+        if (!ltc_have_previous || captured >> 31 ||
+            ((edge_ms - ltc_previous_ms) & LTC_EDGE_MS_MASK) > 2) dt = 0;
+        ltc_have_previous = true;
+        ltc_previous_tick = edge_tick;
+        ltc_previous_ms = edge_ms;
+#else
     for (unsigned n=0; n<8 && ltc_out!=ltc_in && background_allowed(); ++n) {
         __DMB(); unsigned dt=ltc_intervals[ltc_out];
         uint16_t edge_tick=ltc_edge_ticks[ltc_out];
         uint16_t edge_ms=ltc_edge_ms[ltc_out];
         ltc_out=(ltc_out+1)&LTC_MASK;
         if ((uint16_t)((uint16_t)ticks-edge_ms)>50) { ltc_reset(&ltc_decoder); continue; }
+#endif
         if (ltc_interval(&ltc_decoder, dt)) {
             ltc_last_good=clock_us(); ltc_send(ltc_last_good, true);
             ltc_send_anchor(ltc_last_good, edge_tick);
@@ -84,6 +128,10 @@ static void fast_ltc_poll(void) {
     }
     uint32_t now=clock_us();
     if (ltc_decoder.locked && now-ltc_last_good>120000) ltc_reset(&ltc_decoder);
+#ifdef BOW_OPTIMIZED
+    if ((int32_t)(now-ltc_next_report)>=0 && background_allowed())
+#else
     if (background_allowed() && (int32_t)(now-ltc_next_report)>=0)
+#endif
         ltc_send(now, ltc_decoder.locked);
 }

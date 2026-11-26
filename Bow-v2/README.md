@@ -58,14 +58,15 @@ Firmware-v2 and Firmware-v3 share acquisition and serial-protocol code.
 Hardware-specific definitions are selected through
 [config/v2.h](firmware/config/v2.h) and
 [config/v3.h](firmware/config/v3.h). The corresponding LTC-disabled builds use
-the same hardware definitions. Firmware-v3 handles ADC DRDY and IMU FIFO
-interrupts by deferring SPI transactions to the main loop.
+the same hardware definitions. Firmware-v3 uses an 8 KiB IMU FIFO and SPI DMA
+to read batches of samples within the ADC timing guard. Its LTC decoder is
+scheduled ahead of IMU work when the ADC deadline permits.
 
 For source changes, run the following from `firmware/` after installing the
 build dependencies described in the main README:
 
 ```sh
-make       # Build all four supported firmware targets.
+make       # Build the four standard 3 Mbaud firmware targets.
 make test  # Run the firmware project's automated checks.
 ```
 
