@@ -33,6 +33,16 @@ static bool fast_write(uint8_t r, uint8_t v) {
     uint8_t got;
     return wr(r, v) && rd(r, &got) && got == v;
 }
+#ifdef BOW_OPTIMIZED
+/* ICM-45686 FIFO, with APEX disabled. Count and watermark are in frames. */
+enum { IMU_FIFO_DEPTH = 8192, IMU_FIFO_BYPASS = 0x1F, IMU_WATERMARK = 8 };
+/* Interrupt at the watermark crossing. The 5 ms poll also services a
+   FIFO that stays above the watermark while the previous batch drains. */
+enum { IMU_WATERMARK_CONFIG = 0x20 };
+#else
+enum { IMU_FIFO_DEPTH = 2048, IMU_FIFO_BYPASS = 7, IMU_WATERMARK = 2 };
+enum { IMU_WATERMARK_CONFIG = 0x28 };
+#endif
 static bool fast_imu_init(void) {
     if (!imu_init()) return false;
     if (!fast_write(0x10, 0) || !fast_write(0x1B, 0x24) ||
@@ -48,19 +58,32 @@ static bool fast_imu_init(void) {
        changing INT1 polarity/mode; watermark is in FIFO frames, not bytes. */
     if (!fast_write(0x16, 0) || !fast_write(0x17, 0) ||
         !fast_write(0x18, 0x03) || /* push-pull, latched, active high */
-        !fast_write(0x1D, 7) || !fast_write(0x20, 0x28) ||
-        !fast_write(0x1E, 2) || !fast_write(0x1F, 0))
+        !fast_write(0x1D, IMU_FIFO_BYPASS) || !fast_write(0x20, IMU_WATERMARK_CONFIG) ||
+        !fast_write(0x1E, IMU_WATERMARK) || !fast_write(0x1F, 0))
         return init_error("INT1 FIFO watermark");
 #endif
     return fast_write(0x23, 0) && fast_write(0x22, 2) && fast_write(0x21, 14) &&
-        fast_write(0x1D, 7) && fast_write(0x16, BOARD_REV >= 3 ? 3 : 1) &&
-        fast_write(0x1D, 0x87) && fast_write(0x21, 15);
+        fast_write(0x1D, IMU_FIFO_BYPASS) && fast_write(0x16, BOARD_REV >= 3 ? 3 : 1) &&
+        fast_write(0x1D, 0x80 | IMU_FIFO_BYPASS) && fast_write(0x21, 15);
 }
 static bool adc_alive, imu_alive;
 static uint32_t imu_seq, fault_flags;
 #include "fast_adc_irq.inc"
 #include "fast_adc.inc"
-enum { IMU_GUARD_US = 200, IMU_FIFO_CAPACITY = 2048 / 20 };
+enum { IMU_GUARD_US = 200, IMU_FIFO_CAPACITY = IMU_FIFO_DEPTH / 20 };
+#ifdef BOW_OPTIMIZED
+static uint32_t background_time_left_us(void) {
+    if (!adc_alive) return UINT32_MAX;
+    if (adc_result_ready || adc_timer_events != adc_events_used) return 0;
+    if (adc_drdy_armed && (adc_drdy_pending || !(GPIOA->IDR & (1UL << 3)))) return 0;
+    int32_t left = (int32_t)((adc_timer_due + ADC_SLOT_US) - clock_us());
+    /* A timer IRQ between reads may pair a new deadline with an old event. */
+    return left > 0 && adc_timer_events == adc_events_used ? (uint32_t)left : 0;
+}
+static bool background_allowed(void) {
+    return background_time_left_us() > IMU_GUARD_US;
+}
+#else
 static bool background_allowed(void) {
     if (!adc_alive) return true;
     uint32_t events, due;
@@ -69,13 +92,18 @@ static bool background_allowed(void) {
     uint32_t now = clock_us();
     return (int32_t)((due + ADC_SLOT_US) - now) > IMU_GUARD_US;
 }
+#endif
 #include "fast_ltc.inc"
 #include "fast_board.inc"
 #include "fast_imu.inc"
 int main(void) {
     board_init(); delay_ms(300);
     put_str("# Bow hardware V"); put_uint(BOARD_REV);
+#ifdef BOW_OPTIMIZED
+    put_str(" FIFO-DMA LTC-edge25: IMU3200Hz HIRES; bridges1000SPS each; SPI=");
+#else
     put_str(" fast timer-DMA v11 LTC-edge25: IMU3200Hz HIRES fixed-scale32g/4000dps AAF+LPF800Hz; bridges1000SPS each mode3 OSR256 gain32; SPI=");
+#endif
     put_uint(CPU_HZ >> (SPI_BR + 1)); put_str(" UART"); put_uint(BAUD); put_str("; binary v2 follows init\r\n");
 #ifdef DISABLE_LTC_IRQ
     put_str("# LTC disabled: PA0 EXTI off; IMU/ADC full stream; LTC counters stay zero\r\n");
@@ -87,12 +115,19 @@ int main(void) {
         for (unsigned i=0; i<100; ++i) { status_led_poll(true); delay_ms(10); }
     }
     imu_alive = true;
+#ifdef BOW_OPTIMIZED
+    put_str("# INT1 PA6: 8-frame watermark, 8KiB FIFO, 5ms fallback; LED PA4 active-low\r\n");
+#else
     put_str(BOARD_REV >= 3 ? "# INT1 PA6: 2-frame watermark, 5ms fallback; LED PA4 active-low\r\n" : "# V2 FIFO polling\r\n");
+#endif
 #if BOARD_REV >= 3
     put_str("# ADC DRDY PA3 EXTI3 enabled; SPI in main; level fallback\r\n");
 #endif
     put_str("# BINARY_START\r\n");
     tx_init();
+#ifdef BOW_OPTIMIZED
+    imu_fifo_dma_init();
+#endif
     RCC->APBENR1 |= RCC_APBENR1_TIM3EN;
     (void)RCC->APBENR1;
     TIM3->PSC = 47; TIM3->ARR = 65535; TIM3->EGR = TIM_EGR_UG;
@@ -105,18 +140,31 @@ int main(void) {
     adc_drdy_init(); ltc_init(); imu_irq_init();
     uint32_t next_status = 0, status_seq = 0;
     for (;;) {
-        tx_pump(); fast_adc_poll();
+        tx_pump();
+#ifdef BOW_OPTIMIZED
+        if (!fast_imu_dma_service()) fast_adc_poll();
+#else
+        fast_adc_poll();
+#endif
         status_led_poll(!adc_alive || !imu_alive || fault_flags || tx_errors || tx_drops);
         /* A completed ADC sample waits only until the next scheduled START.
            Keep timestamp order and avoid IMU/CRC work in that short gap. */
         if (!background_allowed()) continue;
+#ifdef BOW_OPTIMIZED
+        /* Give LTC a bounded turn ahead of the longer IMU work. ADC still
+           controls when shared SPI work and packet emission can run. */
+        fast_ltc_poll();
+        if (!background_allowed()) continue;
+#endif
         uint32_t now = clock_us();
         if (imu_alive && imu_service_due(now)) {
             fast_imu_poll();
         }
         if (!background_allowed()) continue;
+#ifndef BOW_OPTIMIZED
         fast_ltc_poll();
         if (!background_allowed()) continue;
+#endif
         now = clock_us();
         if ((int32_t)(now - next_status) >= 0) {
             uint8_t payload[18] = {0};

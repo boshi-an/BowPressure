@@ -11,7 +11,9 @@ class FirmwareLogicTests(unittest.TestCase):
     def test_scheduler_and_dma_ring(self):
         root = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as directory:
-            for name in ('test_fast_adc_irq', 'test_fast_adc', 'test_fast_tx', 'test_fast_timer', 'test_fast_board', 'test_fast_imu'):
+            for name in ('test_fast_adc_irq', 'test_fast_adc', 'test_fast_tx', 'test_fast_timer',
+                         'test_fast_board', 'test_fast_imu', 'test_fast_imu_optimized',
+                         'test_fast_ltc', 'test_imu_fifo_dma'):
                 with self.subTest(name=name):
                     exe = Path(directory) / name
                     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',

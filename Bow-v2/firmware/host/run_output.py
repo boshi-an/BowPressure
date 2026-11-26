@@ -1,6 +1,7 @@
 """Four streaming CSV files; finalize LTC interpolation on orderly close."""
 import csv
 from pathlib import Path
+from diagnostics import MCU_DEBUG_FIELDS, PIPE_FIELDS
 from export_ltc import merge_directory
 from serial_rx import RX_FIELDS
 
@@ -18,10 +19,11 @@ FIELDS = {
     'mcu': COMMON + ['host_unix_s', 'tx_drops', 'missed_slots', 'max_late_us', 'faults',
                      'alive', 'imu_status_hex', 'int1_pin', 'fifo_count', 'irq_count',
                      'poll_count', 'observed_us', 'peak_count', 'crc_errors',
-                     'seq_errors', 'imu_dt_errors', 'invalid_payloads', 'message'] + RX_FIELDS,
+                     'seq_errors', 'imu_dt_errors', 'invalid_payloads', 'message'] + RX_FIELDS + PIPE_FIELDS
+                     + list(MCU_DEBUG_FIELDS),
 }
 ROUTE = {'ADC': 'adc', 'IMU': 'imu', 'LTC': 'ltc', 'LTC_ANCHOR': 'ltc',
-         'STATUS': 'mcu', 'IMU_STATUS': 'mcu', 'LOG': 'mcu'}
+         'STATUS': 'mcu', 'IMU_STATUS': 'mcu', 'DIAG': 'mcu', 'LOG': 'mcu'}
 
 
 class RunOutput:

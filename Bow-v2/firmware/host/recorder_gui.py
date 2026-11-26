@@ -16,19 +16,31 @@ from serial.tools import list_ports
 from read import main as record
 
 ROOT = Path(__file__).resolve().parents[1]
+SUPPORTED_BAUD_RATES = (115_200, 1_500_000, 3_000_000)
+EVENT_PREFIXES = {
+    'gap': ('# GAP ',),
+    'stream': ('# STREAM ',),
+    'boot': ('# Bow hardware ',),
+    'boot_reset': ('# V3_DEBUG ',),
+    'mcu_debug': ('# MCU DEBUG ',),
+    'raw_capture': ('# RAW ',),
+    'serial_error': ('错误：', '录制失败：'),
+}
 
 
 class Recorder:
-    def __init__(self):
+    def __init__(self, raw_capture=False):
         self.lock = threading.RLock()
         self.state = 'idle'
         self.logs = deque(maxlen=120)
+        self.events = {}
         self.thread = None
         self.output = ''
         self.started = None
         self.connection = None
         self.shutting_down = False
         self.last_output = ''
+        self.raw_capture = raw_capture
         self.recorded = deque(maxlen=500)
         self.was_recording = False
         self.preview_epoch = None
@@ -37,8 +49,13 @@ class Recorder:
         self.preview_arrival = {}
 
     def report(self, *args, **kwargs):
+        line = ' '.join(map(str, args))
         with self.lock:
-            self.logs.append(' '.join(map(str, args)))
+            self.logs.append(line)
+            for event, prefixes in EVENT_PREFIXES.items():
+                if line.startswith(prefixes):
+                    self.events[event] = line
+                    break
 
     def control(self):
         with self.lock:
@@ -105,7 +122,7 @@ class Recorder:
                 if output.exists():
                     raise ValueError('录制目录已存在，请使用新的名称')
             baud = int(baud)
-            if baud not in (115200, 1500000, 3000000):
+            if baud not in SUPPORTED_BAUD_RATES:
                 raise ValueError('请选择支持的波特率')
             if promoting:
                 if self.connection != (port, baud):
@@ -117,12 +134,14 @@ class Recorder:
             self.connection = (port, baud)
             if not preserve:
                 self.logs.clear()
+                self.events.clear()
                 self.preview_epoch = None
                 for points in self.preview.values(): points.clear()
                 self.preview_arrival.clear()
             self.output, self.state, self.started = (str(output) if output else ''), ('previewing' if preview_only else 'recording'), time.time()
             args = ['--port', port, '--baud', str(baud), '--diagnostics']
             if output: args += ['--output', str(output)]
+            if self.raw_capture: args += ['--raw-capture']
             self.thread = threading.Thread(target=self._run, args=(args,), daemon=False)
             self.thread.start()
 
@@ -151,7 +170,7 @@ class Recorder:
                 raise ValueError('录制或保存期间不能切换串口设置')
             if port not in {p.device for p in list_ports.comports()}:
                 raise ValueError('串口不存在，请刷新设备列表')
-            if baud not in (115200, 1500000, 3000000):
+            if baud not in SUPPORTED_BAUD_RATES:
                 raise ValueError('请选择支持的波特率')
             if self.state == 'previewing' and self.connection == (port, baud):
                 return
@@ -184,7 +203,9 @@ class Recorder:
 
     def snapshot(self):
         with self.lock:
-            return dict(state=self.state, connection=self.connection, output=self.output or self.last_output, logs=list(self.logs), started=self.started)
+            return dict(state=self.state, connection=self.connection,
+                        output=self.output or self.last_output, logs=list(self.logs),
+                        events=dict(self.events), started=self.started)
 
 
 def choose_directory():
@@ -276,8 +297,10 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--port', type=int, default=0, help='Local webpage port; default chooses a free port')
     p.add_argument('--no-browser', action='store_true')
+    p.add_argument('--raw-capture', action='store_true',
+                   help='also save a bounded copy of the serial input for each recording')
     args = p.parse_args()
-    recorder = Recorder()
+    recorder = Recorder(raw_capture=args.raw_capture)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), make_handler(recorder, secrets.token_hex(32)))
     url = f'http://127.0.0.1:{server.server_port}/'
     print(f'录制控制台：{url}\n请用网页中的“结束录制”保存结果；关闭网页不会自动停止录制。', flush=True)

@@ -11,6 +11,7 @@ from pathlib import Path
 import struct
 import time
 import serial
+from diagnostics import CaptureDiagnostics, MCU_DEBUG_FIELDS, PACKET_NAMES, PIPE_FIELDS, format_mcu_debug
 from serial_rx import SerialReceiver, RX_FIELDS
 from imu_time import ImuClock, FIELDS as IMU_TIME_FIELDS
 from sample_time import adc_time, FIELDS as SAMPLE_TIME_FIELDS
@@ -28,6 +29,7 @@ class Decoder:
     def __init__(self):
         self.buffer = bytearray()
         self.crc_errors = 0
+        self.header_errors = 0
         self.discarded = 0
         self.messages = []
         self.text = bytearray()
@@ -64,8 +66,10 @@ class Decoder:
                 break
             frame = bytes(self.buffer[:32])
             crc = struct.unpack_from('<H', frame, 30)[0]
-            if frame[2] != 2 or frame[3] not in (1, 2, 3, 4, 5, 6) or binascii.crc_hqx(frame[:30], 0xFFFF) != crc:
+            bad_header = frame[2] != 2 or frame[3] not in PACKET_NAMES
+            if bad_header or binascii.crc_hqx(frame[:30], 0xFFFF) != crc:
                 self.crc_errors += 1
+                self.header_errors += bad_header
                 self.discard(1)
                 continue
             del self.buffer[:32]
@@ -99,6 +103,8 @@ def decode_frame(frame):
         h, m, s, f, fps, locked, edges, errors, overflows = struct.unpack_from('<6BIII', frame, 12)
         item.update(timecode=f'{h:02}:{m:02}:{s:02}:{f:02}', fps=fps,
                     locked=bool(locked), edges=edges, errors=errors, overflows=overflows)
+    elif kind == 7:
+        item.update(zip(MCU_DEBUG_FIELDS, struct.unpack_from('<IIIHI', frame, 12)))
     else:
         drop, late, max_late, faults, alive = struct.unpack_from('<IIIIH', frame, 12)
         item.update(tx_drops=drop, missed_slots=late, max_late_us=max_late, faults=faults, alive=alive)
@@ -191,14 +197,14 @@ CSV_FIELDS = [
     'imu_status_hex', 'int1_pin', 'fifo_count', 'irq_count', 'poll_count',
     'observed_us', 'peak_count', 'crc_errors', 'seq_errors', 'imu_dt_errors',
     'invalid_payloads', 'message', 'ltc_anchor_mcu_us', 'ltc_anchor_day_us',
-] + IMU_TIME_FIELDS + SAMPLE_TIME_FIELDS + RX_FIELDS
+] + IMU_TIME_FIELDS + SAMPLE_TIME_FIELDS + RX_FIELDS + PIPE_FIELDS + list(MCU_DEBUG_FIELDS)
 
 
 def csv_record(f, tracking, dt, avdd, host_time):
     """One received packet per row; unrelated columns remain empty, never held."""
     typ = f['type']
     row = dict(host_unix_s=host_time,
-               record_type={1: 'IMU', 2: 'ADC', 3: 'STATUS', 4: 'LTC', 5: 'IMU_STATUS', 6: 'LTC_ANCHOR'}[typ],
+               record_type=PACKET_NAMES[typ],
                epoch=tracking.epoch, seq=f['seq'], mcu_read_us=f['read_us'],
                mcu_read_us_unwrapped=tracking.extended_us)
     if typ == 1:
@@ -227,6 +233,8 @@ def csv_record(f, tracking, dt, avdd, host_time):
     elif typ == 4:
         row.update(timecode=f['timecode'], fps=f['fps'], locked=int(f['locked']),
                    edge_count=f['edges'], decode_errors=f['errors'], edge_overflows=f['overflows'])
+    elif typ == 7:
+        row.update({key: f[key] for key in MCU_DEBUG_FIELDS})
     else:
         row.update(imu_status_hex=f"0x{f['imu_status']:02X}")
         row.update({k: f[k] for k in ('int1_pin', 'fifo_count', 'irq_count', 'poll_count', 'observed_us', 'peak_count')})
@@ -246,6 +254,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
     p.add_argument('--avdd', type=float, default=3.3)
     p.add_argument('--lines', action='store_true', help='refresh four values on every data frame; may slow terminal')
     p.add_argument('--diagnostics', action='store_true', help='also show startup, rates and diagnostic summary')
+    p.add_argument('--raw-capture', action='store_true',
+                   help='keep a bounded copy of serial input in RAM and save it in the run directory on stop')
     args = p.parse_args(argv)
     if args.list:
         for port in list_ports.comports():
@@ -259,6 +269,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
         p.error('--avdd must be 2.7..3.6V')
     if args.output and (args.csv or args.ltc_csv):
         p.error('--output cannot be combined with --csv or --ltc-csv')
+    if args.raw_capture and not (args.output or output_provider):
+        p.error('--raw-capture requires --output or a GUI recording')
     if args.output and args.output.exists():
         p.error('--output must be a new directory; existing recordings are never overwritten')
     if args.csv and args.csv.exists():
@@ -269,7 +281,7 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
         p.error('LTC CSV must be a new file')
     if args.ltc_csv and args.ltc_csv.resolve() == args.csv.resolve():
         p.error('Raw CSV and LTC CSV must have different paths')
-    imu_rate_hz = 3200 if args.baud == 3000000 else 1600
+    imu_rate_hz = 3200 if args.baud == 3_000_000 else 1600
     decoder, tracking = Decoder(), Tracking(imu_rate_hz)
     latest, health = {}, {}
     last_arrival = {}
@@ -280,18 +292,62 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
     rx_generation = 0
     rx_last_overflow = 0
     saving = False
+    diagnostics = CaptureDiagnostics() if args.diagnostics else None
+    reported_silence = False
+    raw_capture = None
+    raw_directory = args.output
+    if args.raw_capture:
+        from raw_capture import RawCapture
+        raw_capture = RawCapture()
+
+    def log(message, **fields):
+        if args.diagnostics:
+            report(message)
+        if writer and saving:
+            fields.setdefault('host_monotonic_ns', time.monotonic_ns())
+            writer.writerow(dict(record_type='LOG', host_unix_s=time.time(), message=message, **fields))
+
+    def save_raw_capture():
+        if raw_capture is not None and raw_directory is not None:
+            result = raw_capture.dump(raw_directory)
+            message = (f"# RAW saved={result['bytes_saved']}/{result['bytes_seen']} B"
+                       f" start_byte={result['start_byte_offset']} truncated={result['truncated']}")
+            report(message)
+            if writer:
+                writer.writerow(dict(record_type='LOG', host_unix_s=time.time(),
+                                     host_monotonic_ns=time.monotonic_ns(), message=message))
 
     def report_rx(final=False):
-        nonlocal rx_last_overflow
+        nonlocal rx_last_overflow, reported_silence
         if rx is None:
             return
-        stats = rx.snapshot()
+        stats = rx.snapshot(reset_interval=True)
         overflow = stats['rx_overflow_events'] != rx_last_overflow
         message = (f"# RX{' FINAL' if final else ''}{' OVERFLOW' if overflow else ''} "
                    f"queue={stats['rx_queue_bytes']}/{stats['rx_queue_capacity']} B "
                    f"({100*stats['rx_queue_bytes']/stats['rx_queue_capacity']:.1f}%) "
                    f"peak={stats['rx_queue_peak_bytes']} B "
                    f"overflows={stats['rx_overflow_events']} dropped={stats['rx_dropped_bytes']} B")
+        if diagnostics:
+            idle = stats['rx_read_idle_us']
+            silence = idle is None or idle >= 1000000
+            if silence != reported_silence and not final:
+                text = 'no serial data for at least 1 s' if silence else 'serial data resumed'
+                log(f'# STREAM {text}', **stats)
+                reported_silence = silence
+            idle_ms = f'{idle/1000:.3f}' if idle is not None else 'no-data'
+            message += (f" read={stats['rx_received_bytes']} B"
+                        f" handed_to_decoder={stats['rx_dequeued_bytes']} B idle_ms={idle_ms}"
+                        f" max_read_gap_ms={stats['rx_interval_max_read_gap_us']/1000:.3f}"
+                        f" driver_pending_peak={stats['rx_interval_driver_pending_peak_bytes']} B"
+                        f" max_queue_wait_ms={stats['rx_interval_queue_max_residence_us']/1000:.3f}")
+            stats.update(diagnostics.snapshot(decoder, time.monotonic_ns()), crc_errors=decoder.crc_errors,
+                         seq_errors=tracking.seq_errors, invalid_payloads=invalid)
+            report(f"# PIPE{' FINAL' if final else ''} window_ms={stats['diag_interval_us']/1000:.1f}"
+                   f" decoded={stats['decoded_packets']} saved={stats['saved_packets']}"
+                   f" rejected_bytes_total={stats['decoder_discarded_bytes']} crc_or_header_total={decoder.crc_errors}"
+                   f" decode_ms={stats['decode_us']/1000:.1f} process_ms={stats['process_us']/1000:.1f}"
+                   f" csv_write_ms={stats['csv_write_us']/1000:.1f} csv_flush_ms={stats['csv_flush_us']/1000:.1f}")
         report(message)
         if writer and saving:
             writer.writerow(dict(record_type='LOG', host_unix_s=time.time(),
@@ -316,9 +372,10 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
             port.dtr = port.rts = False
             port.port = args.port
             port.open()
+            stack.callback(save_raw_capture)
             stack.callback(port.close)
             stack.callback(lambda: report_rx(final=True))
-            rx = stack.enter_context(SerialReceiver(port))
+            rx = stack.enter_context(SerialReceiver(port, raw_capture=raw_capture if args.output else None))
             if args.diagnostics:
                 report(f'读取 {args.port} {args.baud} 8N1；IMU{imu_rate_hz}Hz High Resolution，H/F目标各1000SPS；无电脑端滤波。')
             while args.duration is None or time.monotonic() - started < args.duration:
@@ -330,25 +387,47 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                     if destination:
                         from run_output import RunOutput
                         writer = handle = outputs.enter_context(RunOutput(destination))
+                        if raw_capture is not None:
+                            raw_directory = Path(destination)
+                            rx.set_raw_capture(raw_capture)
                         report(f'开始保存到：{destination}')
                 saving = action not in ('paused', 'previewing')
-                generation, chunk = rx.get()
+                try:
+                    generation, chunk = rx.get()
+                except (OSError, serial.SerialException) as exc:
+                    log(f'# STREAM serial read failed: {exc}', **rx.snapshot())
+                    raise
                 if generation is not None and generation != rx_generation:
                     decoder.discard(len(decoder.buffer))
                     decoder.text.clear()
                     rx_generation = generation
-                if rx.snapshot()['rx_overflow_events'] != rx_last_overflow:
+                if rx.overflow_events() != rx_last_overflow:
                     report_rx()
-                for f in decoder.feed(chunk):
+                decode_started_ns = time.monotonic_ns() if diagnostics else 0
+                frames = decoder.feed(chunk)
+                if diagnostics:
+                    process_started_ns = time.monotonic_ns()
+                    diagnostics.decode_ns += process_started_ns - decode_started_ns
+                    diagnostics.decoded += len(frames)
+                    gaps = []
+                for f in frames:
                     typ = f['type']
                     if typ == 2 and (f['channel'] not in (0, 1) or f['gain'] != 32 or not -8388608 <= f['raw'] < 8388608):
                         invalid += 1
                         continue
                     old_epoch = tracking.epoch
+                    previous_mcu_us = tracking.extended_us
                     dt = tracking.update(f)
                     if tracking.epoch != old_epoch:
                         latest.clear(); health.clear(); last_arrival.clear()
                         no_diag_warned = False
+                        if diagnostics:
+                            diagnostics.reset_epoch()
+                            log(f'# STREAM MCU timestamp discontinuity epoch={tracking.epoch}'
+                                f' mcu_us={previous_mcu_us}->{tracking.extended_us}',
+                                epoch=tracking.epoch, mcu_read_us_unwrapped=tracking.extended_us)
+                    if diagnostics:
+                        gaps.extend(diagnostics.observe(f, tracking.epoch, tracking.extended_us, previous_mcu_us))
                     if typ in (1, 2):
                         last_arrival['I' if typ == 1 else ('H' if f['channel'] == 0 else 'F')] = time.monotonic()
                     host_time = time.time()
@@ -374,6 +453,9 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                         if args.ltc_lines:
                             report(f"LTC {latest['ltc']} {f['fps']}fps edges={f['edges']} "
                                   f"errors={f['errors']} overflow={f['overflows']}")
+                    elif typ == 7:
+                        if diagnostics:
+                            report(format_mcu_debug(f))
                     else:
                         health = f
                     row = None
@@ -384,14 +466,29 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                     if writer and saving:
                         row.update(crc_errors=decoder.crc_errors, seq_errors=tracking.seq_errors,
                                    imu_dt_errors=tracking.timing_errors, invalid_payloads=invalid)
+                        write_started_ns = time.monotonic_ns() if diagnostics else 0
                         writer.writerow(row)
+                        if diagnostics:
+                            diagnostics.write_ns += time.monotonic_ns() - write_started_ns
+                            diagnostics.saved += 1
                     if args.lines and typ in (1, 2):
                         report(format_display(latest))
+                if diagnostics:
+                    diagnostics.process_ns += time.monotonic_ns() - process_started_ns
+                    if gaps:
+                        stats = rx.snapshot()
+                        stamp = time.monotonic_ns()
+                        for gap in gaps:
+                            seq = (f" seq={gap['gap_from_seq']}->{gap['seq']} missing={gap['gap_missing_packets']}"
+                                   if 'seq' in gap else '')
+                            log(f"# GAP stream={gap['gap_stream']} epoch={gap['epoch']}{seq}"
+                                f" mcu_us={gap['gap_from_mcu_us']}->{gap['mcu_read_us_unwrapped']}"
+                                f" gap_ms={gap['gap_mcu_us']/1000:.3f}"
+                                f" queue={stats['rx_queue_bytes']} B crc_or_header_total={decoder.crc_errors}",
+                                **gap, **stats, host_monotonic_ns=stamp, crc_errors=decoder.crc_errors,
+                                decoder_discarded_bytes=decoder.discarded)
                 for message in decoder.messages:
-                    if args.diagnostics:
-                        report(message)
-                    if writer and saving:
-                        writer.writerow(dict(host_unix_s=time.time(), record_type='LOG', message=message.rstrip('\r')))
+                    log(message.rstrip('\r'))
                 decoder.messages.clear()
                 now = time.monotonic()
                 if 'ltc_received' in latest and now - latest['ltc_received'] > .2:
@@ -427,7 +524,12 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                     if not args.lines:
                         report(format_display(shown))
                     if handle:
+                        flush_started_ns = time.monotonic_ns() if diagnostics else 0
                         handle.flush()
+                        if diagnostics:
+                            flush_ns = time.monotonic_ns() - flush_started_ns
+                            diagnostics.flush_ns += flush_ns
+                            diagnostics.max_flush_ns = max(diagnostics.max_flush_ns, flush_ns)
                     last_display = now
     except KeyboardInterrupt:
         pass

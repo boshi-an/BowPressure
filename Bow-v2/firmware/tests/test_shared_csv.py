@@ -10,6 +10,51 @@ from test_read_fast import packet
 
 
 class SharedCsvTests(unittest.TestCase):
+    def test_diagnostics_record_corruption_and_shared_gap(self):
+        payload = struct.pack('<iHBBII', 123, 0xff00, 0, 32, 100, 400)
+        corrupt = bytearray(packet(2, 1, 1000, payload))
+        corrupt[12] ^= 1
+        diagnostics = packet(7, 0, 23100, struct.pack('<IIIHI', 0x08000000, 22100, 1500, 96, 105))
+        stream = packet(2, 0, 500, payload) + corrupt + packet(2, 45, 23000, payload) + diagnostics
+
+        class Port:
+            in_waiting = len(stream)
+            sent = False
+
+            def open(self): pass
+            def close(self): pass
+
+            def read(self, size):
+                if self.sent:
+                    raise KeyboardInterrupt
+                self.sent = True
+                return stream
+
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory) / 'capture'
+            with patch.object(read.serial, 'Serial', return_value=Port()):
+                self.assertEqual(read.main(['--port', 'fake', '--output', str(run),
+                                            '--diagnostics', '--raw-capture'],
+                                           report=lambda message: None), 0)
+            with (run / 'adc.csv').open() as handle:
+                self.assertEqual([row['seq'] for row in csv.DictReader(handle)], ['0', '45'])
+            with (run / 'mcu.csv').open() as handle:
+                logs = list(csv.DictReader(handle))
+            shared, adc = [row for row in logs if row['gap_stream']]
+            debug = next(row for row in logs if row['record_type'] == 'DIAG')
+            final = next(row for row in logs if row['message'].startswith('# RX FINAL'))
+            self.assertEqual((shared['gap_stream'], shared['gap_mcu_us']), ('ALL', '22500'))
+            self.assertEqual((adc['gap_stream'], adc['gap_from_seq'], adc['seq'], adc['gap_missing_packets']),
+                             ('ADC', '0', '45', '44'))
+            self.assertEqual([debug[key] for key in read.MCU_DEBUG_FIELDS],
+                             [str(0x08000000), '22100', '1500', '96', '105'])
+            self.assertEqual(int(final['rx_received_bytes']), len(stream))
+            self.assertEqual(final['rx_dequeued_bytes'], final['rx_received_bytes'])
+            self.assertEqual((final['decoded_packets'], final['saved_packets']), ('3', '3'))
+            self.assertEqual((final['crc_errors'], final['decoder_header_errors']), ('1', '0'))
+            self.assertEqual((final['decoder_discarded_bytes'], final['decoder_pending_bytes']), ('32', '0'))
+            self.assertEqual((run / 'serial.bin').read_bytes(), stream)
+
     def test_mixed_stream_is_saved_once_without_filling_other_channels(self):
         stream = b'# Bow hardware V3\r\n'
         stream += packet(1, 0, 100, struct.pack('<6hH', 1024, -2, 3, 4, 5, 6, 65500))
