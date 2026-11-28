@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Capture or replay the bytes returned by a serial port before packet decoding."""
 import argparse
-from contextlib import closing
 import csv
 import json
 import math
@@ -112,17 +111,14 @@ class RawCapture:
         return summary
 
 
-def capture_serial(port_name, baud, duration, output, max_bytes, max_chunks):
-    import serial
+def capture_serial(port_name, baud, duration, output, max_bytes, max_chunks, transport='auto'):
     from serial_rx import SerialReceiver
+    from serial_transport import open_transport
 
     capture = RawCapture(max_bytes=max_bytes, max_chunks=max_chunks)
     output.mkdir(parents=True, exist_ok=False)
     try:
-        with closing(serial.Serial(port=None, baudrate=baud, timeout=.05)) as port:
-            port.dtr = port.rts = False
-            port.port = port_name
-            port.open()
+        with open_transport(port_name, baud, transport) as port:
             end = time.monotonic() + duration
             with SerialReceiver(port, raw_capture=capture) as receiver:
                 while (remaining := end - time.monotonic()) > 0:
@@ -189,11 +185,14 @@ def replay(source):
 
 
 def main(argv=None):
+    from serial_transport import TRANSPORTS
+
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     capture = commands.add_parser('capture', help='capture raw bytes without CSV sensor processing')
     capture.add_argument('--port', required=True)
     capture.add_argument('--baud', type=int, default=3_000_000)
+    capture.add_argument('--transport', choices=TRANSPORTS, default='auto')
     capture.add_argument('--duration', type=float, default=60)
     capture.add_argument('--output', type=Path, required=True)
     capture.add_argument('--max-mib', type=int, default=DEFAULT_MAX_BYTES // (1024 * 1024))
@@ -208,7 +207,7 @@ def main(argv=None):
         if not math.isfinite(args.duration) or args.duration <= 0 or args.baud <= 0:
             parser.error('duration and baud must be positive')
         success = capture_serial(args.port, args.baud, args.duration, args.output,
-                                 args.max_mib * 1024 * 1024, args.max_chunks)
+                                 args.max_mib * 1024 * 1024, args.max_chunks, args.transport)
         return 0 if success else 1
     except (OSError, ValueError) as exc:
         parser.exit(1, f'{exc}\n')

@@ -13,6 +13,7 @@ import time
 import serial
 from diagnostics import CaptureDiagnostics, MCU_DEBUG_FIELDS, PACKET_NAMES, PIPE_FIELDS, format_mcu_debug
 from serial_rx import SerialReceiver, RX_FIELDS
+from serial_transport import TRANSPORTS, open_transport
 from imu_time import ImuClock, FIELDS as IMU_TIME_FIELDS
 from sample_time import adc_time, FIELDS as SAMPLE_TIME_FIELDS
 from serial.tools import list_ports
@@ -246,6 +247,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
     p.add_argument('--port')
     p.add_argument('--list', action='store_true')
     p.add_argument('--baud', type=int, default=3000000)
+    p.add_argument('--transport', choices=TRANSPORTS, default='auto',
+                   help='auto uses direct USB for supported macOS FT232R ports')
     p.add_argument('--duration', type=float)
     p.add_argument('--output', type=Path, help='New run directory: adc.csv, imu.csv, ltc.csv, mcu.csv')
     p.add_argument('--csv', type=Path, help='NEW shared CSV: IMU, ADC H/F, LTC, status and FIFO diagnostics')
@@ -308,7 +311,7 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
             writer.writerow(dict(record_type='LOG', host_unix_s=time.time(), message=message, **fields))
 
     def save_raw_capture():
-        if raw_capture is not None and raw_directory is not None:
+        if rx is not None and raw_capture is not None and raw_directory is not None:
             result = raw_capture.dump(raw_directory)
             message = (f"# RAW saved={result['bytes_saved']}/{result['bytes_seen']} B"
                        f" start_byte={result['start_byte_offset']} truncated={result['truncated']}")
@@ -328,6 +331,8 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                    f"({100*stats['rx_queue_bytes']/stats['rx_queue_capacity']:.1f}%) "
                    f"peak={stats['rx_queue_peak_bytes']} B "
                    f"overflows={stats['rx_overflow_events']} dropped={stats['rx_dropped_bytes']} B")
+        if 'ftdi_overrun_packets' in stats:
+            message += ' ' + ' '.join(f'{field}={stats[field]}' for field in stats if field.startswith('ftdi_'))
         if diagnostics:
             idle = stats['rx_read_idle_us']
             silence = idle is None or idle >= 1000000
@@ -368,12 +373,9 @@ def main(argv=None, control=None, report=print, on_sample=None, output_provider=
                 writer = csv.DictWriter(handle, fieldnames=CSV_FIELDS)
                 writer.writeheader()
                 report(f'全部数据保存到：{args.csv.resolve()}')
-            port = serial.Serial(port=None, baudrate=args.baud, timeout=.05)
-            port.dtr = port.rts = False
-            port.port = args.port
-            port.open()
             stack.callback(save_raw_capture)
-            stack.callback(port.close)
+            port = stack.enter_context(open_transport(args.port, args.baud, args.transport))
+            report(f'# TRANSPORT {port.transport_name}')
             stack.callback(lambda: report_rx(final=True))
             rx = stack.enter_context(SerialReceiver(port, raw_capture=raw_capture if args.output else None))
             if args.diagnostics:
