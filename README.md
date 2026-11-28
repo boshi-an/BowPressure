@@ -73,14 +73,34 @@ Start from the **BowPressure root directory**:
 # Create the environment once; skip this line if stm32 already exists.
 conda env create -f Bow-v2/firmware/environment.yml
 conda activate stm32
+python -m pip install -r requirements.txt
 cd Bow-v2/firmware
 python host/recorder_gui.py
 ```
 
+The requirements install the direct USB dependencies on macOS.
 The service opens a local webpage and automatically starts previewing the
 preferred USB serial device. Use the URL printed in the terminal if the browser
 does not open. `--no-browser` suppresses automatic browser opening;
 `--port 8080` selects the HTTP server port, not the serial device.
+
+### Direct FTDI USB on macOS
+
+The console and command-line recorder automatically use direct USB for FT232R
+adapters with USB ID `0403:6001` at 3,000,000 or 1,500,000 baud on macOS. Select
+the adapter's usual serial device path. The recorder uses that selection to
+identify the adapter by its USB serial number. The serial backend handles other
+adapters, baud rates, and operating systems. The GUI launcher, command-line recorder, and raw
+capture accept `--transport serial` to select the serial backend explicitly or
+`--transport ftdi-usb` to require direct USB on a supported adapter.
+
+An oscilloscope capture recovered all 141 packets missing from a synchronized
+Mac recording at the adapter's UART input. In a separate controlled test through
+Apple's virtual serial port, the FT232R reported a receive FIFO overrun 105.6 ms
+after the application paused reading. The direct reader keeps sixteen 4 KiB USB
+receive requests submitted so transfers can continue during a brief host pause.
+With the same FT232R and USB hub, a 139 ms pause and a separate 10-minute run
+finished with zero packet gaps, CRC errors, or UART overruns.
 
 ### Preview and recording
 
@@ -99,8 +119,8 @@ Plots use reduced display data, while CSV files retain the received samples
 without host-side smoothing. Each plot uses a vertical span of 120% of its
 minimum-to-maximum range. The latest-readings panel updates once per second.
 
-Serial settings are locked during recording and pausing. Only one program may
-open the serial device at a time. Closing the webpage does not stop the service;
+Serial settings are locked during recording and pausing. Use one receiver per
+adapter at a time. Closing the webpage does not stop the service;
 press **Ctrl+C in its terminal** to stop it and finalize an active recording.
 
 ### Command-line recording
@@ -127,6 +147,10 @@ overflow events, and dropped bytes. It is shown below the GUI readings and in
 the terminal, and saved as structured `LOG` rows in `mcu.csv` during recording.
 A final snapshot is logged on shutdown. Counters cover the serial connection,
 including preview, and reset when that connection is reopened.
+
+For direct USB, `ftdi_overrun_packets` counts USB packets whose FT232R status
+reports a UART receive overrun. It is recorded in the `# RX` diagnostics and in
+`mcu.csv` alongside the recorder's queue counters.
 
 An overflow means an incoming chunk could not fit: that chunk is discarded,
 the event/byte counters increase, and packet decoding resynchronizes at the gap.

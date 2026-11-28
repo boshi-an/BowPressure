@@ -3,13 +3,16 @@ from collections import deque
 import threading
 from time import monotonic_ns
 
+from ftdi_usb import FTDI_STATUS_FIELDS
+
 RX_FIELDS = ['rx_queue_bytes', 'rx_queue_capacity', 'rx_queue_peak_bytes',
              'rx_received_bytes', 'rx_overflow_events', 'rx_dropped_bytes',
              'rx_read_chunks', 'rx_last_read_monotonic_ns', 'rx_read_idle_us',
              'rx_max_read_gap_us', 'rx_max_read_gap_at_monotonic_ns',
              'rx_driver_pending_peak_bytes', 'rx_dequeued_bytes',
              'rx_queue_max_residence_us', 'rx_interval_max_read_gap_us',
-             'rx_interval_driver_pending_peak_bytes', 'rx_interval_queue_max_residence_us']
+             'rx_interval_driver_pending_peak_bytes', 'rx_interval_queue_max_residence_us',
+             *FTDI_STATUS_FIELDS]
 
 
 class SerialReceiver:
@@ -17,6 +20,8 @@ class SerialReceiver:
         if capacity <= 0:
             raise ValueError('capacity must be positive')
         self.port, self.capacity = port, capacity
+        self.read_chunk = getattr(port, 'read_chunk', None)
+        self.transport_status = getattr(port, 'status', None)
         self.condition = threading.Condition()
         self.queue = deque()
         self.size = self.peak = self.received = self.overflows = self.dropped = 0
@@ -78,8 +83,11 @@ class SerialReceiver:
         try:
             while not self.stopped.is_set():
                 pending = 0
-                pending = self.port.in_waiting
-                chunk = self.port.read(min(4096, max(1, pending)))
+                if self.read_chunk is None:
+                    pending = self.port.in_waiting
+                    chunk = self.port.read(min(4096, max(1, pending)))
+                else:
+                    chunk = self.read_chunk()
                 if chunk:
                     self._enqueue(chunk, pending)
                 elif pending:
@@ -120,11 +128,14 @@ class SerialReceiver:
                       self.interval_gap_ns // 1000, self.interval_pending, self.interval_residence_ns // 1000)
             if reset_interval:
                 self.interval_gap_ns = self.interval_pending = self.interval_residence_ns = 0
-            return dict(zip(RX_FIELDS, values))
+            snapshot = dict(zip(RX_FIELDS, values))
+            if self.transport_status is not None:
+                snapshot.update(self.transport_status())
+            return snapshot
 
     def __exit__(self, *args):
         self.stopped.set()
-        # The port uses a 50 ms read timeout. Join before its owner closes it.
+        # Reads have a bounded wait. Join before their transport closes.
         self.thread.join()
         with self.condition:
             self.condition.notify_all()

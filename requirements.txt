@@ -1,3 +1,5 @@
 pyserial>=3.5,<4
 matplotlib>=3.7,<4
 numpy>=1.23,<3
+libusb1>=3.3,<4; sys_platform == "darwin"
+libusb-package>=1.0.26.2,<2; sys_platform == "darwin"
